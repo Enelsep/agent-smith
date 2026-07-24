@@ -1,3 +1,7 @@
+# Not part of the submission: the exam scripts expect ./student and
+# ./moulinette side by side, so the moulinette lives next to the repo, not in it.
+moulinette/
+
 __pycache__/
 *.py[codz]
 *$py.class
