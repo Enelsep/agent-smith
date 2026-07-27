@@ -1,6 +1,13 @@
 # Agent Smith — Scope, Architecture & Kanban Breakdown
 
-> Working document for a 3-person team. Provider decision so far: **Groq** as the main inference provider.
+> Working document for a 3-person team. **Provider is not ours to hardcode:** the model name and
+> provider URL arrive as CLI flags (`--model-name` / `--provider-url`) and the `.env` is supplied at
+> run time, so the provider must be **derived from the URL**. Groq is only our *development* default,
+> applied when nothing is passed; OpenRouter is kept configured and tested as the fallback (the
+> subject's own example key is `OPENROUTER_API_KEY`).
+>
+> _Revised after auditing the plan against the subject (v1.1) and the moulinette source. See_
+> `AUDIT_PLAN_VS_SUBJECT.md` _for the reasoning behind each change._
 
 ---
 
@@ -123,18 +130,33 @@ p.17. Worth a sentence in the README so the evaluator doesn't think we misread i
 ├── BENCHMARK_REPORT.md
 ├── README.md
 ├── pyproject.toml               # uv, python 3.10, [project.scripts] sandbox = ...
-└── src/agent_smith/
-    ├── models/          # Pydantic: SandboxConfig, MBPPTaskInput, SWEBenchTaskInput,
-    │                    #           StepMetrics, SolutionOutput
-    ├── llm/             # provider abstraction, key rotation, retry, usage tracking
-    ├── extraction/      # multi-format code extraction + normalisation
-    ├── sandbox/         # worker process, guards, RPC protocol, REPL, manual generator
-    ├── mcp/             # client (stdio + streamable HTTP), tool discovery, wrapper codegen
-    ├── agent/           # orchestrator, prompts/, history compaction, budget guard
-    ├── tools/           # tool implementations, shared by both MCP servers
-    ├── docker/          # container lifecycle for SWE-bench
-    └── cli/             # agent_mbpp, agent_swebench, sandbox entrypoints
+└── src/
+    ├── agent_mbpp/__main__.py       # thin top-level pkg: delegates to agent_smith.cli.mbpp
+    ├── agent_swebench/__main__.py   # thin top-level pkg: delegates to agent_smith.cli.swebench
+    └── agent_smith/
+        ├── models/          # Pydantic: SandboxConfig, MBPPTaskInput, SWEBenchTaskInput,
+        │                    #           StepMetrics, SolutionOutput
+        ├── llm/             # provider abstraction, key rotation, retry, usage tracking
+        ├── extraction/      # multi-format code extraction + normalisation
+        ├── sandbox/         # worker process, guards, RPC protocol, REPL, manual generator
+        ├── mcp/             # client (stdio + streamable HTTP), tool discovery, wrapper codegen
+        ├── agent/           # orchestrator, prompts/, history compaction, budget guard
+        ├── tools/           # tool implementations, shared by both MCP servers
+        ├── docker/          # container lifecycle for SWE-bench
+        └── cli/             # mbpp, swebench, sandbox entrypoints
 ```
+
+> **Why the two thin top-level packages:** the subject invokes the agents as `python -m agent_mbpp`
+> / `python -m agent_swebench`, which requires importable **top-level** modules of those exact names
+> on `sys.path`. Burying them under `agent_smith.cli` would fail with `No module named agent_mbpp`.
+> `pyproject.toml` must ship all three packages in the wheel.
+
+> **Tools run against a configurable root, not "Docker" hardwired.** Each tool
+> (`read_file`, `search_code`, `edit_file`, `run_tests`, `get_patch`, …) resolves paths under a
+> configurable testbed root (`TESTBED_PATH`, default `/testbed`). That root can be a plain directory
+> on disk *or* a path inside a Docker container reached via `docker exec`. This is what lets the 9
+> tools be exercised **standalone, without the agent loop and without Docker** (a deliverable in its
+> own right) — the diagram above shows the SWE-bench production path, not the only path.
 
 ---
 
@@ -151,6 +173,11 @@ Freeze both **on day one** (task `SETUP-2`) — everything else can then move in
 
 Integration points where two people must sit together: `SBX-4` (tool wrappers), `MBPP-1`,
 `SWE-1`. Benchmark report (`BENCH-*`) is shared — one person runs the matrix, all three write analysis.
+
+> **Docker is a day-one dependency on all three machines, not just Stream C.** MBPP validation runs
+> the generated solutions inside a `python:3.11-slim` container (`mbpp/interact.py`), so Dev 1 and
+> Dev 2 need a working Docker daemon to validate *anything* in MBPP — it is not only a SWE-bench
+> concern. Add "Docker runs" to each machine's `SETUP` checklist.
 
 ---
 
@@ -174,7 +201,7 @@ docstrings written, doesn't break `exam_sandbox.sh`.
 | **M2** | MBPP exam passes 4/5 within limits | MBPP-3..5, CORE-6..7 |
 | **M3** | Sandbox exam passes 100% | SBX-3..8 |
 | **M4** | One SWE-bench task solved | SWE-1..6, TOOL-1..9 |
-| **M5** | SWE exam 2/3 + benchmark report + README | SWE-7..8, BENCH-1..4, DOC-1..3 |
+| **M5** | SWE exam 2/3 + benchmark report + README | SWE-7..9, BENCH-1..4, DOC-1..3 |
 
 ---
 
@@ -188,29 +215,52 @@ docstrings written, doesn't break `exam_sandbox.sh`.
 
 `pyproject.toml` pinned to Python 3.10, `uv` lockfile, `[project.scripts] sandbox = "agent_smith.cli.sandbox:main"`,
 ruff + pytest, pre-commit hook blocking anything that looks like an API key (regex on `gsk_`, `sk-`).
+Declare the two thin top-level packages `agent_mbpp` and `agent_swebench` in the wheel so the
+subject's `python -m …` invocation resolves (see §3).
 
-*Done when:* `uv run sandbox --help` prints usage on all three machines.
+*Done when:* on all three machines, `uv run sandbox --help`, `uv run python -m agent_mbpp --help`
+and `uv run python -m agent_swebench --help` all print usage (the `-m` forms are the ones the
+subject actually calls — test them explicitly, not just the `sandbox` script).
 
 ---
 
 **`SETUP-2` · Freeze Pydantic contracts** · all three, 1h together · S · SETUP-1
 
-Type out `SandboxConfig`, `MBPPTaskInput`, `SWEBenchTaskInput`, `StepMetrics`, `SolutionOutput`
-**exactly** as in the subject (field names and types are validated by the moulinette — don't
-"improve" them). Add our own internal ones: `ToolSpec`, `ExecutionResult`, `LLMResponse`, `AgentConfig`.
+**Copy `moulinette/models_public.py` verbatim** into `src/agent_smith/models/contract.py` (its own
+header says students are meant to copy it; it is the exact file the moulinette imports to validate
+our output). Do **not** retype the models — a single renamed field fails
+`SolutionOutput.model_validate()` before any test runs. Derive our internal ones
+(`ToolSpec`, `ExecutionResult`, `LLMResponse`, `AgentConfig`) alongside it, never on top of it.
 
-*Done when:* `models/` is merged and nobody edits it again without telling the other two.
+Two field-level traps to encode as tests, not code-review notes:
+
+- **`SolutionOutput.task_id` is a `str`** even for MBPP, whose `task_id` is an `int`. Pydantic v2
+  will not coerce `int → str`; writing `"task_id": 282` is rejected as `string_type` and the task is
+  scored failed before correctness is even checked. Always emit `str(task.task_id)`.
+- **`SolutionOutput` carries the full `system_prompt`** and each `StepMetrics` carries `llm_output`,
+  `sandbox_input`, `sandbox_output`, `model_name`, `api_url`, `retries` and per-step token counts.
+  These are how the run is audited for integrity — wire them to the real execution path from the
+  start (see `DOC-3`), never post-hoc.
+
+*Done when:* `models/` is merged, a round-trip test serialises/validates a sample `solution.json`
+through the moulinette's own model, and nobody edits it again without telling the other two.
 
 ---
 
 **`SETUP-3` · Config files + env loading** · Dev 2 · S · SETUP-2
 
 `sandbox_template.json` (matches `SandboxConfig` defaults), `models.json` (provider → base_url,
-model list, per-model stop sequences, max_tokens). `.env` loading via `python-dotenv`, keys read as
-`GROQ_API_KEY`, `GROQ_API_KEY_2`, … plus `GROQ_API_KEYS` comma-separated. `.env.example` committed,
-`.env` gitignored.
+model list, per-model stop sequences, max_tokens). `.env` loading via `python-dotenv`.
 
-*Done when:* zero secrets in git history (`git log -p | grep -E 'gsk_|sk-'` is empty).
+**Key resolution must be provider-agnostic.** We do not control the `.env` handed to us at run time,
+nor the key names in it. Resolve the provider from `--provider-url` (not a hardcoded constant), then
+scan several conventions for that provider: `<PROVIDER>_API_KEY`, `<PROVIDER>_API_KEY_2`, `…_N`,
+`<PROVIDER>_API_KEYS` (comma-separated), and a generic fallback. Groq env names apply only as the
+dev default when nothing else is passed; `OPENROUTER_API_KEY` must work out of the box (it is the
+subject's own example). `.env.example` committed, `.env` gitignored.
+
+*Done when:* the same code path loads keys for a Groq URL and an OpenRouter URL with no source
+change, and zero secrets are in git history (`git log -p | grep -E 'gsk_|sk-'` is empty).
 
 ---
 
@@ -231,11 +281,17 @@ retypes the 4-line CLI invocation forty times a day.
 Abstract `LLMProvider` with one method: `complete(messages, stop, max_tokens) -> LLMResponse`
 carrying `text, input_tokens, output_tokens, latency_ms, model, api_url, retries`.
 `OpenAICompatProvider` implements it with plain `httpx` (not the `openai` SDK — one less dependency
-and we control retry semantics). Groq is `https://api.groq.com/openai/v1`; OpenRouter and Together
-then come for free by changing a base URL.
+and we control retry semantics). The concrete endpoint is **selected from `--provider-url`**, never
+a hardcoded constant: Groq is `https://api.groq.com/openai/v1`, OpenRouter (and any other
+OpenAI-compatible free-tier endpoint) then comes for free by changing the base URL.
 
-> Groq's model catalogue changes often — read `GET /openai/v1/models` at startup and validate the
+> Model catalogues change often — read `GET /openai/v1/models` at startup and validate the
 > configured name against it rather than hardcoding a list that rots.
+
+> The lone `httpx` dependency is for the LLM call itself and nothing else. Because a blanket grep for
+> `httpx`/`urllib`/`requests` is a standard anti-cheat signal (it *could* be used to fetch
+> solutions), say in one README line that our only outbound HTTP is the inference call, so the
+> legitimate use isn't mistaken for exfiltration.
 
 ---
 
@@ -301,17 +357,30 @@ edit minimally → `run_tests` → `final_answer(get_patch())`.
 
 Stop sequences configured per model: `["<end_code>", "</tool_call>", "Observation:"]`.
 
+**MBPP prompt must forbid over-fitting to the visible asserts.** The task harness hides the first
+test from the agent (`InteractMBPP.get_task()` serves `test_list[1:]` / `test_imports[1:]`) but
+validation runs on the *complete* list. So an agent that hardcodes the values of the asserts it can
+see passes locally and fails validation. The prompt must demand a **general** implementation and
+must state that the solution has to carry **its own `import` statements** — the sliced
+`test_imports` means the agent cannot rely on imports provided by the test harness.
+
 *Note:* the subject explicitly invites a vague-vs-explicit prompt comparison — capture the numbers,
 it's a free ablation for `BENCH-3`.
 
 ---
 
-**`CORE-7` · History compaction** · Dev 2 · M · CORE-4, CORE-5
+**`CORE-7` · History compaction** · Dev 2 · M · CORE-4, CORE-5 · *blocks `MBPP-3`*
 
-For SWE-bench: keep system + task + first 2 steps + last N steps verbatim, replace the middle with
+Keep system + task + first 2 steps + last N steps verbatim, replace the middle with
 a one-line summary per elided step (`step 7: read /testbed/sympy/core/mul.py:100-160`). Truncate
 every observation to K chars with an explicit `[... truncated, 4210 chars omitted ...]` marker —
 silent truncation is called out in the subject as a failure mode.
+
+**This is needed for MBPP too, not just SWE-bench.** The quadratic-history math in §2 (6 400 input
+tokens by iteration 4) assumes an append-only transcript; the "solve in 2–3 iterations" conclusion
+only treats the symptom. A sliding window that resends system + task + last observation keeps
+per-iteration input roughly flat and makes the full 10 iterations actually usable. Therefore `CORE-7`
+is a **dependency of `MBPP-3`**, not a SWE-bench-only task.
 
 ---
 
@@ -361,7 +430,14 @@ Two layers, because a builtins allowlist alone is not enough:
   paths with `os.path.realpath` and checks containment in `allowed_directories` (defeats
   `../` and symlink escapes).
 
-*Done when:* a red-team test file with ~15 escape attempts is fully blocked.
+**Handle an authorised directory that doesn't exist on this host.** The default `allowed_directories`
+are `/testbed` and `/tmp/agent`; when the sandbox runs on the host (not in the SWE-bench container)
+`/testbed` may not exist. The path-restriction logic must treat "authorised but absent" as a clean,
+readable denial for anything outside the set — never a crash — and the sandbox must **create
+`/tmp/agent` at startup** so scratch writes have a legal home.
+
+*Done when:* a red-team test file with ~15 escape attempts is fully blocked, and a path check
+against an authorised-but-missing directory returns a clear message instead of an exception.
 
 ---
 
@@ -431,9 +507,14 @@ required, easy to forget).
 
 **`MCP-4` · SWE-bench MCP server** · Dev 3 · L · MCP-1, TOOL-*
 
-`mcp_tools_swebench.py` exposing the 9 mandatory tools, all operating inside the Docker container.
-Reads target container/testbed from env so it works standalone when tools are tested independently
-of the agent.
+`mcp_tools_swebench.py` exposing the 9 mandatory tools. They operate against the configurable
+testbed root from §3 (`TESTBED_PATH`), which must work **both** as a plain directory on disk **and**
+as a path inside the Docker container. The standalone filesystem mode is not optional: the tools are
+exercised directly against a local git repo — no agent loop, no Docker — so `docker exec` must never
+be wired in as the only code path. `get_patch()` in that mode is a `git diff` in the testbed dir.
+
+Only our **own** MCP servers are ever connected — never a public or third-party MCP server, for any
+purpose including testing.
 
 ---
 
@@ -451,7 +532,7 @@ are specified in the subject and must be matched character-for-character.
 | `TOOL-5` | `search_function_or_class_definition_in_code(name)` | Walk `ast` for `FunctionDef`/`AsyncFunctionDef`/`ClassDef`; more precise than grep and immune to comments. |
 | `TOOL-6` | `find_references(name, filepath, line)` | `jedi` in the container gives real references; keep an AST/grep fallback so the tool never hard-fails. |
 | `TOOL-7` | `run_tests()` | Runs the task's `eval_script`. **Parse the output** into `N passed / M failed` + failing test names — the raw pytest dump will eat the token budget. |
-| `TOOL-8` | `get_patch()` | `git -c core.fileMode=false diff` exactly as specified. Strip `.pyc`/artifacts. |
+| `TOOL-8` | `get_patch()` | `git -c core.fileMode=false diff` exactly as specified, **restricted to tracked files**. The real failure mode isn't `.pyc` — it's a `reproduce.py` the agent drops in `/testbed` to reproduce the bug, which lands in the diff and can break the eval script's pytest collection. Force all scratch/reproduction files into `/tmp/agent` (see prompt + `SBX-4`) and keep the patch to tracked sources. |
 | `TOOL-9` | `run_command(command, workdir)` | stdout + stderr + exit code, with a timeout and truncation. |
 
 ---
@@ -473,10 +554,11 @@ Prove the pipeline works before optimising anything. Success = one task validate
 
 ---
 
-**`MBPP-3` · Fit inside 6k/1.5k/10** · Dev 2 · M · MBPP-2, CORE-5, CORE-6
+**`MBPP-3` · Fit inside 6k/1.5k/10** · Dev 2 · M · MBPP-2, CORE-5, CORE-6, CORE-7
 
-Shrink the prompt, force `run_tests` then `final_answer` in as few turns as possible. Measure
-actual token spend per iteration and put the table in the README.
+Shrink the prompt, force `run_tests` then `final_answer` in as few turns as possible, and rely on
+the sliding history from `CORE-7` to keep per-iteration input flat. Measure actual token spend per
+iteration and put the table in the README.
 
 ---
 
@@ -491,6 +573,10 @@ disqualified here by the 1 500-token output cap.
 
 We need well above 80 % locally to survive a 4/5 exam with no retries. Log failures by category
 (extraction miss, wrong logic, budget overrun) — that's what tells us where to spend effort.
+
+Efficiency counts beyond the pass bar: quality is judged on how far *under* the limits we run (few
+iterations, low token spend), not just pass/fail. Track avg iterations and % of budget used as
+first-class metrics and treat "5/5 with low iteration counts" as the real target, not "4/5 anyhow".
 
 ---
 
@@ -540,7 +626,9 @@ pytest output. Fix the tools, not the prompt.
 **`SWE-7` · Generalisation check** · all · L · SWE-6
 
 Run 8–10 varied SWE-bench Verified tasks (not just the 3 suggested ones) to confirm we haven't
-overfitted. The exam draws 3 at random from the full set.
+overfitted. The exam draws 3 at random from the full set. As with MBPP, aim well under the 30-iter /
+300k-token ceilings — efficient convergence (low iterations, small gap between "tests pass" and
+`final_answer`) is what separates a solid run from a minimum pass.
 
 ---
 
@@ -551,16 +639,38 @@ Model loops on the same edit, `edit_file` never matches, tests time out, patch i
 
 ---
 
-### Epic BENCH — the report
+**`SWE-9` · Anti-cheat policy** · all · S · SWE-3
+
+Provenance is graded hard: fetching a fix from PRs/issues/external sources, or applying a memorised
+patch without real exploration, is scored **0** — not a failed task. Three decisions to make and
+document explicitly rather than leave to chance:
+
+- **Container network: off by default.** With no network, a `run_command("pip install …")` or a
+  `curl github.com` simply can't happen — consistent with `SWE-2`'s "tolerate failure" bootstrap.
+  Decide it, don't inherit it by accident.
+- **`run_command` scope in `/testbed`:** whether `git log` / `git show` are allowed at all. Pin the
+  policy and document the reasoning.
+- **Prompt wording:** neither system prompt may invite the model to "recall" an upstream fix. The
+  methodology must read as explore-then-fix, because `llm_output` / `sandbox_input` are read back to
+  trace how the agent actually reasoned — a further reason never to truncate those two fields.
 
 ---
 
 **`BENCH-1` · Benchmark runner script** · Dev 2 · M · SWE-5
 
-Runs the model × task matrix, stores each `solution.json` under `evaluations/`, aggregates into a
-markdown table. 5 models × 3 tasks minimum. Groq gives us several models on one API; add one
-OpenRouter model so the "provider reliability" section has an actual comparison and to prove the
-provider abstraction isn't Groq-shaped.
+Runs the model × task matrix and aggregates into a markdown table. 5 models × 3 tasks minimum. Groq
+gives us several models on one API; add one OpenRouter model so the "provider reliability" section
+has an actual comparison and to prove the provider abstraction isn't Groq-shaped.
+
+**Store our runs under `benchmarks/`, not `evaluations/`.** The `evaluations/EVAL_TYPE/<timestamp>/`
+tree is reserved by the subject (VI.5) for official evaluation runs, and the moulinette already
+writes there; dumping our own matrix into it mixes our artefacts with that reserved structure. Keep
+them separate.
+
+**Start the first matrix pass the moment `SWE-5` is green, not at M5.** 5 models × 3 SWE tasks at a
+900 s ceiling, plus multi-GB image pulls and reruns on failure, is a half-day of wall-clock on one
+machine and depends on daily free-tier quotas. Run it early (rerun later if needed) so we hit the
+quota wall now, not in the last week.
 
 ---
 
@@ -586,6 +696,11 @@ size: (a) vague vs. methodology-rich system prompt, (b) with vs. without observa
 The 6 required sections. Section 6 (conclusions) must actually name the model we ship and the
 models we discard, justified by our own numbers.
 
+**Decide now which `solution.json` files get committed.** The subject both requires the backing
+`solution.json` to be present *and* forbids committing generated outputs — resolve it by committing
+**only** the files that back the report (the 5 models × 3 tasks = 15 files) and nothing else. Write
+the decision here so the answer is ready at the defense.
+
 ---
 
 ### Epic DOC — documentation & hardening
@@ -598,21 +713,46 @@ English. Italic first line with the three logins. Description / Instructions / R
 AI was used, per section) + the required extras: system architecture, agent loop, sandbox design,
 tool implementation details, benchmark results.
 
+Include two short paragraphs that pre-empt predictable misreadings: **(1)** why the MCP client lives
+in the parent process and not in the network-less sandbox worker (the two are separate security
+domains — see §3); **(2)** that our only outbound HTTP (`httpx`) is the LLM inference call, so a
+generic HTTP-client grep isn't mistaken for fetching solutions.
+
 ---
 
 **`DOC-2` · Sandbox exam dry run** · Dev 1 · M · SBX-3..7
 
-Write our own `exam_sandbox.sh` equivalent: import block, builtin block, network block, path
-restriction, timeout, memory limit, MCP protocol. This one has to pass **ALL** — no partial credit.
+Write our own `exam_sandbox.sh` equivalent covering import block, builtin block, network block, path
+restriction, timeout, memory limit, and the MCP protocol (stdio + HTTP, tool discovery, manual
+generation, structured feedback). This one has to pass **ALL** — no partial credit.
+
+**Drive the CLI as a black box, not our internal classes.** The real exam feeds code on stdin to
+`uv run sandbox [--mcp-stdio … | --mcp-server …] config.json`, so every capability — config load,
+MCP connection, execution, error text — must be reachable and legible from that surface. Our dry-run
+must exercise exactly that entry point; if something only works by importing our modules, it doesn't
+count.
 
 ---
 
 **`DOC-3` · Defense rehearsal** · all · S · everything
 
-The evaluator will ask each of us to make a **live 2–5 minute modification** and re-run. Practice:
-change `max_iterations`, add a line to the system prompt, add a tool, change a truncation limit.
-Everyone should be able to find every file. Also rehearse the "why is your MCP client in the parent
-process" question.
+The evaluator will ask each of us to make a **live 2–5 minute modification** and re-run, then check
+`solution.json` reflects it — the point is to prove our metrics are wired to real execution, not
+fabricated. Rehearse the four field-provenance edits until anyone on the team can do each in under
+5 minutes:
+
+- inject a marker at the **start of the system prompt** → it must appear in `solution.json`'s
+  `system_prompt`;
+- print a marker **before user code runs** in the sandbox → it must appear in every step's
+  `sandbox_output`;
+- prepend a marker to the **code string sent to the sandbox** → it must appear in every step's
+  `sandbox_input`;
+- override the **logged `model_name`** without changing the real API call → the field changes and
+  the task still solves (proves per-step metadata is independent of the call).
+
+Also practice the ordinary knobs (change `max_iterations`, add a tool, change a truncation limit)
+and rehearse the "why is your MCP client in the parent process" question. If someone can't find the
+file for one of these, they don't understand their own codebase — fix that before the defense.
 
 ---
 
