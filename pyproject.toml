@@ -1,0 +1,22 @@
+[project]
+name = "agent-smith"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic",
+    "mypy",
+    "flake8",
+    "ruff",
+    ]
+[tool.mypy]
+warn_return_any = true
+explicit_package_bases = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+exclude = [
+    '.venv/',
+]
