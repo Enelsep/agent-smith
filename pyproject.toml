@@ -34,12 +34,25 @@ testpaths = ["tests"]
 "src/agent_smith/models/contract.py" = ["DTZ005"]
 
 [tool.mypy]
+# Without `mypy_path`, mypy resolves `agent_smith.*` through the installed
+# distribution instead of the sources here. Combined with the absence of a
+# `py.typed` marker, that made every one of our own cross-module imports `Any`
+# — `ignore_missing_imports` silenced the warning, so `make check` passed while
+# checking almost nothing across module boundaries. The marker files and this
+# line are what make the type gate real; do not drop either.
+mypy_path = "src"
 warn_return_any = true
 explicit_package_bases = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+# Checked from the repository root, not just `src/`: `mcp_tools_*.py`, `main.py`
+# and the test suite live outside it, and the first two are artefacts the
+# evaluation imports. The exclusions are declared here rather than passed on the
+# command line so they hold even where `moulinette/` is absent — it is gitignored
+# and exists on no machine but ours.
 exclude = [
-    '.venv/',
+    '\.venv/',
+    'moulinette/',
 ]
