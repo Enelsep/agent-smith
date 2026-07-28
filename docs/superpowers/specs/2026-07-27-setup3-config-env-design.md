@@ -32,8 +32,10 @@ testable:
   (the latter returns the frozen contract's `SandboxConfig`).
 - **`schema.py`** — internal Pydantic models for `models.json` (`ModelsConfig`, `ProviderConfig`,
   `ModelConfig`). These are *internal* models, kept separate from the frozen `contract.py`.
+- **`errors.py`** — the `ConfigError` raised by the whole package. Its own module so `keys.py` can
+  raise it without importing the orchestration layer that imports `keys.py`.
 - **`resolve.py`** — orchestration: `resolve_config(...) -> ResolvedConfig`, plus the
-  `ResolvedConfig` model and a `ConfigError` exception.
+  `ResolvedConfig` model.
 - **`__init__.py`** — re-exports `resolve_config`, `ResolvedConfig`, `ConfigError`.
 
 ## Data flow
@@ -41,15 +43,26 @@ testable:
 1. The CLI passes `--provider-url` and `--model-name` (both optional; Groq is the dev default when
    absent).
 2. `load_dotenv()` loads `.env` into the process environment.
-3. **Provider prefix** — `provider_prefix_from_url` maps the URL to a prefix via a known-hosts table
-   (`api.groq.com → GROQ`, `openrouter.ai → OPENROUTER`, `api.together.xyz → TOGETHER`,
-   `mistral.ai → MISTRAL`, `*.google* → GOOGLE`), falling back to the uppercased second-level domain
-   for an unknown host.
+3. **Provider prefix** — `provider_prefix_from_url` uppercases the host's second-level domain, which
+   already yields `GROQ`, `OPENROUTER`, `MISTRAL`, `TOGETHER` and so on with nothing hardcoded.
+   A small override table carries only the hosts that rule gets *wrong* — today just
+   `googleapis.com → GOOGLE`, since the second-level domain would read `GOOGLEAPIS`. Listing
+   providers the fallback already handles would turn the table into a support list and suggest we
+   endorse some endpoints over others, which is the opposite of what this module is for.
 4. **Key discovery** — `discover_api_keys(prefix, env)`:
-   - collect, in order: `<PREFIX>_API_KEY`, then `<PREFIX>_API_KEY_2`, `_3`, … (stop at the first
-     gap), then `<PREFIX>_API_KEYS` split on commas;
+   - collect, in order: `<PREFIX>_API_KEY`, then `<PREFIX>_API_KEY_2` … `_32`, then
+     `<PREFIX>_API_KEYS` split on commas;
+   - the numbered scan **tolerates holes** and is bounded instead of stopping at the first gap.
+     Commenting a burnt key out of a `.env` must disable that key, not every key after it —
+     silently shrinking the pool is exactly what starves CORE-2 of keys to rotate through when the
+     rate limits hit, and it would happen under exam pressure;
    - merge preserving first-seen order and drop duplicates and blanks;
-   - if the result is empty, fall back to generic names `API_KEY`, then `LLM_API_KEY`;
+   - if the result is empty, fall back to generic names `LLM_API_KEY`, then `API_KEY` — most
+     specific first, because a bare `API_KEY` in a `.env` we did not write could belong to any
+     service;
+   - the generic names are a *fallback*, never an addition: a stray `API_KEY` sitting next to a
+     prefixed one almost certainly belongs to something else, and pushing it into the pool means
+     sending a third party's key to the provider's endpoint for a 401 that burns a retry;
    - return the ordered list (possibly empty — the caller decides whether empty is fatal).
 5. **Model settings** — `models.json` supplies `stop` and `max_tokens` for known models; unknown
    `--model-name` values get safe defaults. `base_url` is the passed `--provider-url` (or the known
@@ -124,10 +137,11 @@ SETUP-3 produces; CORE-1 reads `base_url`/`model_name`/`stop`/`max_tokens`, CORE
 
 ## Testing (TDD — tests before implementation)
 
-- **`provider_prefix_from_url`**: known hosts; unknown-host fallback; trailing slash; `http` vs
-  `https`; sub-domains; unparseable input → error.
-- **`discover_api_keys`**: single `_API_KEY`; consecutive `_API_KEY_2.._N` with a gap; `_API_KEYS`
-  CSV; merge/dedup/order; blanks skipped; generic fallback when nothing prefixed; empty result.
+- **`provider_prefix_from_url`**: overridden host; unknown-host fallback; trailing slash; `http` vs
+  `https`; sub-domains; hyphenated domain → legal variable name; unparseable input → error.
+- **`discover_api_keys`**: single `_API_KEY`; `_API_KEY_2.._N` across a gap; the scan's upper bound;
+  `_API_KEYS` CSV; merge/dedup/order; blanks skipped; another provider's keys ignored; generic
+  fallback when nothing prefixed, most specific name winning; empty result.
 - **`resolve_config` (the Done-when)**: a Groq URL and an OpenRouter URL both resolve through the
   *same* code path with a monkeypatched env; `ResolvedConfig` carries the right base_url, keys, and
   model settings.
