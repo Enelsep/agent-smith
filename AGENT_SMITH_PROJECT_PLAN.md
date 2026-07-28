@@ -214,7 +214,13 @@ docstrings written, doesn't break `exam_sandbox.sh`.
 **`SETUP-1` · Repo skeleton + uv + tooling** · Dev 1 · S · —
 
 `pyproject.toml` pinned to Python 3.10, `uv` lockfile, `[project.scripts] sandbox = "agent_smith.cli.sandbox:main"`,
-ruff + pytest, pre-commit hook blocking anything that looks like an API key (regex on `gsk_`, `sk-`).
+ruff + pytest. ~~pre-commit hook blocking anything that looks like an API key (regex on `gsk_`,
+`sk-`)~~ — **dropped from this card, 2026-07-28.** The subject asks for no such hook, and the graded
+criterion it was meant to serve (VI.3: *"any API key found in your source code will be flagged
+during evaluation"*) is about the source we ship, which `SETUP-3` satisfies by loading keys from the
+environment. A git hook guards a different thing — our own commits — and `--no-verify` makes it
+advisory anyway. Nothing enforces the secrets rule today and `CONTRIBUTING.md` now says so plainly
+instead of promising a hook that never existed. Reinstate here if we decide we want the net.
 Declare the two thin top-level packages `agent_mbpp` and `agent_swebench` in the wheel so the
 subject's `python -m …` invocation resolves (see §3).
 
