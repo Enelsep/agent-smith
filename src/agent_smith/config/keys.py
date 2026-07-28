@@ -78,6 +78,20 @@ def discover_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]:
     return keys
 
 
+def candidate_key_names(prefix: str) -> list[str]:
+    """Name every variable `discover_api_keys` consults, for error messages.
+
+    The numbered range is summarised rather than expanded: thirty-two names in
+    a stderr line help nobody.
+    """
+    return [
+        f"{prefix}_API_KEY",
+        f"{prefix}_API_KEY_2 … {prefix}_API_KEY_{_MAX_NUMBERED_KEYS}",
+        f"{prefix}_API_KEYS",
+        *_GENERIC_KEY_NAMES,
+    ]
+
+
 def _append(keys: list[str], value: str | None) -> None:
     """Append `value` stripped, unless it is blank or already collected."""
     if value is None:
