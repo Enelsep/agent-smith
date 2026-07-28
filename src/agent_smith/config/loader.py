@@ -1,13 +1,14 @@
 """Reading the JSON config files off disk.
 
-Every failure mode — absent file, bad JSON, wrong shape — comes back as a
-`ConfigError` naming the file, so a misconfiguration is readable at the point
-it happens instead of surfacing as an AttributeError three modules later.
+Every failure mode — absent file, bad JSON, wrong shape, misspelled key — comes
+back as a `ConfigError` naming the file, so a misconfiguration is readable at
+the point it happens instead of surfacing as an AttributeError three modules
+later.
 """
 
 import json
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,8 +20,12 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def load_models_config(path: Path) -> ModelsConfig:
-    """Load the provider/model catalogue."""
-    return _load(path, ModelsConfig)
+    """Load the provider/model catalogue.
+
+    `ModelsConfig` is ours, so it declares `extra="forbid"` and rejects typos on
+    its own, at every level of nesting.
+    """
+    return _validate(path, _read_json(path), ModelsConfig)
 
 
 def load_sandbox_config(path: Path) -> SandboxConfig:
@@ -29,21 +34,45 @@ def load_sandbox_config(path: Path) -> SandboxConfig:
     Ours is a development default: at evaluation the grader hands us its own
     `SandboxConfig`, so this file never has to match the exam's allowlist.
     """
-    return _load(path, SandboxConfig)
+    data = _read_json(path)
+    _reject_unknown_keys(path, data, SandboxConfig)
+    return _validate(path, data, SandboxConfig)
 
 
-def _load(path: Path, model: type[T]) -> T:
+def _read_json(path: Path) -> Any:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"cannot read {path}: {exc}") from exc
 
     try:
-        data = json.loads(raw)
+        return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ConfigError(f"{path} is not valid JSON: {exc}") from exc
 
+
+def _validate(path: Path, data: Any, model: type[T]) -> T:
     try:
         return model.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"{path} does not match {model.__name__}:\n{exc}") from exc
+
+
+def _reject_unknown_keys(path: Path, data: Any, model: type[BaseModel]) -> None:
+    """Fail on a key the model does not know, instead of dropping it.
+
+    `SandboxConfig` comes from the frozen contract, so we cannot give it
+    `extra="forbid"`, and all of its fields have defaults. Left alone, writing
+    `authorized_import` validates cleanly and hands back an empty allowlist —
+    every import refused at run time, with nothing to explain why. The check
+    lives here because the model is not ours to change.
+    """
+    if not isinstance(data, dict):
+        return
+
+    unknown = set(data) - set(model.model_fields)
+    if unknown:
+        raise ConfigError(
+            f"{path}: unknown key(s) {sorted(unknown)} for {model.__name__}. "
+            f"Known fields: {sorted(model.model_fields)}"
+        )

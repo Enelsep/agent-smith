@@ -121,6 +121,18 @@ class TestLoadSandboxConfig:
         with pytest.raises(ConfigError):
             load_sandbox_config(write_json(tmp_path / "sandbox.json", payload))
 
+    def test_an_unknown_field_is_rejected_so_typos_do_not_pass_silently(
+        self, tmp_path: Path
+    ) -> None:
+        # `SandboxConfig` belongs to the frozen contract, so we cannot give it
+        # `extra="forbid"`. Without a guard here, `authorized_import` validates
+        # cleanly and the sandbox runs with an empty allowlist — every import
+        # refused, and nothing said why.
+        payload = {"authorized_import": ["math"], "allowed_directories": ["/testbed"]}
+
+        with pytest.raises(ConfigError, match="authorized_import"):
+            load_sandbox_config(write_json(tmp_path / "sandbox.json", payload))
+
 
 class TestCommittedConfigFiles:
     """The files we ship must stay loadable — they are the defaults we run with."""
