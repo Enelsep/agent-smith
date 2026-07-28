@@ -8,10 +8,17 @@ Both functions are pure — the environment comes in as a mapping — which is w
 makes the whole key-resolution path testable without touching `os.environ`.
 """
 
+import ipaddress
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from agent_smith.config.errors import ConfigError
+
+# An IP address or `localhost` names a machine, not a provider: there is nothing
+# to derive a prefix from, and the second-level rule would read "0" off
+# 127.0.0.1 — not even a legal variable name. Local inference servers (Ollama,
+# vLLM, llama.cpp) get this one instead, and the generic names still apply.
+_LOCAL_PREFIX = "LOCAL"
 
 # Overrides, not a support list: a host only belongs here when the fallback
 # below gets it wrong. `api.groq.com` and `openrouter.ai` already yield GROQ and
@@ -41,6 +48,9 @@ def provider_prefix_from_url(url: str) -> str:
     host = urlparse(url).hostname
     if not host:
         raise ConfigError(f"cannot read a host out of the provider URL: {url!r}")
+
+    if _is_address(host):
+        return _LOCAL_PREFIX
 
     for domain, prefix in _PREFIX_OVERRIDES.items():
         if host == domain or host.endswith(f".{domain}"):
@@ -90,6 +100,17 @@ def candidate_key_names(prefix: str) -> list[str]:
         f"{prefix}_API_KEYS",
         *_GENERIC_KEY_NAMES,
     ]
+
+
+def _is_address(host: str) -> bool:
+    """True when the host names a machine rather than a provider."""
+    if host == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
 
 def _append(keys: list[str], value: str | None) -> None:

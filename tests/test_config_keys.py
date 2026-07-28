@@ -35,6 +35,26 @@ class TestProviderPrefixFromUrl:
     def test_hyphens_become_underscores_so_the_prefix_is_a_legal_var_name(self) -> None:
         assert provider_prefix_from_url("https://api.my-llm.io/v1") == "MY_LLM"
 
+    def test_an_address_carries_no_provider_name_to_derive(self) -> None:
+        # A local inference server (Ollama, vLLM, llama.cpp) is a realistic dev
+        # endpoint. The second-level rule would read "0" off 127.0.0.1, which is
+        # not even a legal variable name.
+        assert provider_prefix_from_url("http://127.0.0.1:8000/v1") == "LOCAL"
+        assert provider_prefix_from_url("http://192.168.1.10:11434/v1") == "LOCAL"
+
+    def test_ipv6_and_localhost_are_addresses_too(self) -> None:
+        assert provider_prefix_from_url("http://[::1]:8000/v1") == "LOCAL"
+        assert provider_prefix_from_url("http://localhost:8000/v1") == "LOCAL"
+
+    def test_every_derived_prefix_is_a_legal_variable_name(self) -> None:
+        for url in (
+            "https://api.groq.com/openai/v1",
+            "https://api.my-llm.io/v1",
+            "http://127.0.0.1:8000/v1",
+            "http://localhost:8000/v1",
+        ):
+            assert provider_prefix_from_url(url).isidentifier(), url
+
     def test_url_without_a_host_is_an_error(self) -> None:
         with pytest.raises(ConfigError):
             provider_prefix_from_url("not a url")

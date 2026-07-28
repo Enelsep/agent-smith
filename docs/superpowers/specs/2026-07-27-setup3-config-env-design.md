@@ -29,7 +29,11 @@ testable:
   - `provider_prefix_from_url(url: str) -> str`
   - `discover_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]`
 - **`loader.py`** — file I/O + validation: `load_models_config(path)`, `load_sandbox_config(path)`
-  (the latter returns the frozen contract's `SandboxConfig`).
+  (the latter returns the frozen contract's `SandboxConfig`). `load_sandbox_config` **rejects
+  unknown keys explicitly**, because `SandboxConfig` is not ours to give `extra="forbid"` and every
+  one of its fields has a default: writing `authorized_import` would otherwise validate cleanly and
+  hand back an empty allowlist — every import refused at run time, with nothing to explain why.
+  `models.json` needs no such guard, its models are ours and already forbid extras.
 - **`schema.py`** — internal Pydantic models for `models.json` (`ModelsConfig`, `ProviderConfig`,
   `ModelConfig`). These are *internal* models, kept separate from the frozen `contract.py`.
 - **`errors.py`** — the `ConfigError` raised by the whole package. Its own module so `keys.py` can
@@ -49,6 +53,10 @@ testable:
    `googleapis.com → GOOGLE`, since the second-level domain would read `GOOGLEAPIS`. Listing
    providers the fallback already handles would turn the table into a support list and suggest we
    endorse some endpoints over others, which is the opposite of what this module is for.
+   An **address is not a provider**: `127.0.0.1`, `[::1]`, a private IP or `localhost` all resolve
+   to `LOCAL`, because the second-level rule would read `0` off `127.0.0.1` — not even a legal
+   variable name. Local inference servers (Ollama, vLLM, llama.cpp) are a realistic development
+   endpoint, and `LOCAL_API_KEY` gives them a usable convention.
 4. **Key discovery** — `discover_api_keys(prefix, env)`:
    - collect, in order: `<PREFIX>_API_KEY`, then `<PREFIX>_API_KEY_2` … `_32`, then
      `<PREFIX>_API_KEYS` split on commas;
