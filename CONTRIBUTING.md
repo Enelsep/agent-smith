@@ -56,9 +56,11 @@ card spans two streams.
 ## Commits & hygiene
 
 - Present tense, one logical change per commit; reference the card id in the body when useful.
-- **Never commit secrets.** API keys load from `.env`, which is gitignored.
-  *TODO: the pre-commit hook blocking `gsk_` / `sk-` patterns is described here but does not exist
-  yet — until someone writes it, this rule is on us.*
+- **Never commit secrets.** API keys load from `.env`, which is gitignored. **Nothing enforces
+  this** — there is no hook, nothing scans our commits — so it is on us, and `git add -f` walks
+  straight past `.gitignore`. At evaluation the keys come from the `--envfile` handed to the exam
+  scripts; the ones we can leak are our own free-tier development keys, and a burned quota costs us
+  a run.
 - **Respect `.gitignore`:** the moulinette checkout, `.env` and generated run outputs stay out of
   git. Only the `solution.json` files that back `BENCHMARK_REPORT.md` are committed.
 - **Personal files stay out of the shared `.gitignore`.** Anything that concerns only your machine
