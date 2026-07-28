@@ -41,11 +41,24 @@ card spans two streams.
 - Mergeable when: **1 approval**, **CI green** (`ruff` + `pytest`), and it **doesn't break
   `exam_sandbox.sh`**.
 
+## Documentation
+
+- **Docs follow the same rule as code: branch → PR. No direct commit to `main`**, even for a
+  markdown file.
+- What belongs on `main`: **design specs** in `docs/superpowers/specs/`, shipped in the PR of the
+  card they describe, and the plan/audit documents at the root. A spec states decisions and
+  trade-offs — it is what we defend at the oral.
+- What does **not** belong on `main`: throwaway working documents — session checklists, drafts,
+  scratch notes. Keep them outside the repo; add the path to your own `.git/info/exclude` (local,
+  never pushed) rather than to the shared `.gitignore`.
+
 ## Commits & hygiene
 
 - Present tense, one logical change per commit; reference the card id in the body when useful.
-- **Never commit secrets.** API keys load from `.env` (gitignored); the pre-commit hook blocks
-  `gsk_` / `sk-` patterns.
-- **Respect `.gitignore`:** the moulinette checkout, the subject PDF, `.env`, and generated run
-  outputs stay out of git. Only the `solution.json` files that back `BENCHMARK_REPORT.md` are
-  committed.
+- **Never commit secrets.** API keys load from `.env`, which is gitignored.
+  *TODO: the pre-commit hook blocking `gsk_` / `sk-` patterns is described here but does not exist
+  yet — until someone writes it, this rule is on us.*
+- **Respect `.gitignore`:** the moulinette checkout, `.env` and generated run outputs stay out of
+  git. Only the `solution.json` files that back `BENCHMARK_REPORT.md` are committed.
+- **Personal files stay out of the shared `.gitignore`.** Anything that concerns only your machine
+  goes in `.git/info/exclude`.
