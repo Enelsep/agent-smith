@@ -6,6 +6,7 @@ the moulinette is strict about:
   - `SolutionOutput.task_id` is a *string* (MBPP `task_id` is an int and must be stringified);
   - an int `task_id` is rejected before any correctness check even runs.
 """
+
 import json
 
 import pytest
@@ -62,6 +63,7 @@ def _sample_solution() -> dict:
 
 # --- round trip -------------------------------------------------------------
 
+
 def test_solution_output_roundtrips_through_json() -> None:
     data = _sample_solution()
     # exactly what the moulinette does before scoring:
@@ -84,6 +86,7 @@ def test_solution_output_serialises_task_id_as_json_string() -> None:
 
 # --- the task_id trap -------------------------------------------------------
 
+
 def test_task_id_is_string_when_built_from_mbpp_int() -> None:
     mbpp = MBPPTaskInput(
         task_id=282,
@@ -104,11 +107,18 @@ def test_int_task_id_is_rejected() -> None:
 
 # --- required fields --------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "missing",
     [
-        "task_id", "benchmark", "success", "solution", "iterations",
-        "total_requests", "total_input_tokens", "total_output_tokens",
+        "task_id",
+        "benchmark",
+        "success",
+        "solution",
+        "iterations",
+        "total_requests",
+        "total_input_tokens",
+        "total_output_tokens",
         "total_time_seconds",
     ],
 )
@@ -121,19 +131,38 @@ def test_required_solution_fields_are_enforced(missing: str) -> None:
 
 # --- contract shape (guards against verbatim drift) -------------------------
 
+
 def test_solution_output_has_all_contract_fields() -> None:
     expected = {
-        "task_id", "benchmark", "success", "solution", "iterations",
-        "total_requests", "total_input_tokens", "total_output_tokens",
-        "total_time_seconds", "steps", "system_prompt", "error", "timestamp",
+        "task_id",
+        "benchmark",
+        "success",
+        "solution",
+        "iterations",
+        "total_requests",
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_time_seconds",
+        "steps",
+        "system_prompt",
+        "error",
+        "timestamp",
     }
     assert expected <= set(SolutionOutput.model_fields)
 
 
 def test_step_metrics_has_all_contract_fields() -> None:
     expected = {
-        "step", "input_tokens", "output_tokens", "request_time_ms", "timestamp",
-        "api_url", "model_name", "llm_output", "sandbox_input", "sandbox_output",
+        "step",
+        "input_tokens",
+        "output_tokens",
+        "request_time_ms",
+        "timestamp",
+        "api_url",
+        "model_name",
+        "llm_output",
+        "sandbox_input",
+        "sandbox_output",
         "retries",
     }
     assert expected <= set(StepMetrics.model_fields)
@@ -141,17 +170,24 @@ def test_step_metrics_has_all_contract_fields() -> None:
 
 # --- defaults ---------------------------------------------------------------
 
+
 def test_step_metrics_optional_defaults() -> None:
     step = StepMetrics(step=1, input_tokens=10, output_tokens=5, request_time_ms=1.0)
     assert step.retries == 0
     assert step.api_url == "" and step.model_name == ""
-    assert step.llm_output == "" and step.sandbox_input == "" and step.sandbox_output == ""
+    assert (
+        step.llm_output == "" and step.sandbox_input == "" and step.sandbox_output == ""
+    )
     assert step.timestamp  # auto ISO timestamp populated
 
 
 def test_solution_output_defaults() -> None:
     obj = SolutionOutput.model_validate(
-        {k: v for k, v in _sample_solution().items() if k not in ("steps", "system_prompt")}
+        {
+            k: v
+            for k, v in _sample_solution().items()
+            if k not in ("steps", "system_prompt")
+        }
     )
     assert obj.steps == []
     assert obj.system_prompt == ""
@@ -166,6 +202,7 @@ def test_sandbox_config_defaults() -> None:
 
 
 # --- SWE-bench input smoke --------------------------------------------------
+
 
 def test_swebench_task_input_optional_fields() -> None:
     task = SWEBenchTaskInput(

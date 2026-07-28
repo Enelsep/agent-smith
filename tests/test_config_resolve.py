@@ -29,7 +29,10 @@ MODELS = {
             "base_url": "https://openrouter.ai/api/v1",
             "default_model": "qwen/qwen3-235b-a22b-2507",
             "models": {
-                "qwen/qwen3-235b-a22b-2507": {"stop": ["Observation:"], "max_tokens": 900},
+                "qwen/qwen3-235b-a22b-2507": {
+                    "stop": ["Observation:"],
+                    "max_tokens": 900,
+                },
             },
         },
     },

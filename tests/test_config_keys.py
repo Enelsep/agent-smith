@@ -67,7 +67,11 @@ class TestDiscoverApiKeys:
         assert discover_api_keys("GROQ", {"GROQ_API_KEY_2": "k2"}) == ["k2"]
 
     def test_comma_separated_plural_variable(self) -> None:
-        assert discover_api_keys("GROQ", {"GROQ_API_KEYS": "k1,k2 , k3"}) == ["k1", "k2", "k3"]
+        assert discover_api_keys("GROQ", {"GROQ_API_KEYS": "k1,k2 , k3"}) == [
+            "k1",
+            "k2",
+            "k3",
+        ]
 
     def test_all_conventions_merge_in_order_without_duplicates(self) -> None:
         env = {
@@ -78,7 +82,11 @@ class TestDiscoverApiKeys:
         assert discover_api_keys("GROQ", env) == ["k1", "k2", "k3"]
 
     def test_blank_values_are_skipped(self) -> None:
-        env = {"GROQ_API_KEY": "   ", "GROQ_API_KEY_2": "k2", "GROQ_API_KEYS": "k3,,  ,k4"}
+        env = {
+            "GROQ_API_KEY": "   ",
+            "GROQ_API_KEY_2": "k2",
+            "GROQ_API_KEYS": "k3,,  ,k4",
+        }
         assert discover_api_keys("GROQ", env) == ["k2", "k3", "k4"]
 
     def test_another_providers_keys_are_ignored(self) -> None:
