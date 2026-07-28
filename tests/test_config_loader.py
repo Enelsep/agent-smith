@@ -1,0 +1,146 @@
+"""Loading and validating `models.json` and `sandbox_template.json`."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from agent_smith.config import ConfigError
+from agent_smith.config.loader import load_models_config, load_sandbox_config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+VALID_MODELS = {
+    "providers": {
+        "groq": {
+            "base_url": "https://api.groq.com/openai/v1",
+            "default_model": "llama-3.3-70b-versatile",
+            "models": {
+                "llama-3.3-70b-versatile": {"stop": ["<end_code>"], "max_tokens": 1500},
+            },
+        },
+    },
+}
+
+
+def write_json(path: Path, payload: object) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+class TestLoadModelsConfig:
+    def test_reads_a_provider_and_its_models(self, tmp_path: Path) -> None:
+        config = load_models_config(write_json(tmp_path / "models.json", VALID_MODELS))
+
+        provider = config.providers["groq"]
+        assert provider.base_url == "https://api.groq.com/openai/v1"
+        assert provider.default_model == "llama-3.3-70b-versatile"
+        assert provider.models["llama-3.3-70b-versatile"].stop == ["<end_code>"]
+        assert provider.models["llama-3.3-70b-versatile"].max_tokens == 1500
+
+    def test_model_settings_are_optional(self, tmp_path: Path) -> None:
+        payload = {
+            "providers": {
+                "groq": {
+                    "base_url": "https://api.groq.com/openai/v1",
+                    "default_model": "m",
+                    "models": {"m": {}},
+                },
+            },
+        }
+        config = load_models_config(write_json(tmp_path / "models.json", payload))
+
+        assert config.providers["groq"].models["m"].stop == []
+        assert config.providers["groq"].models["m"].max_tokens is None
+
+    def test_missing_file_is_a_config_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError):
+            load_models_config(tmp_path / "absent.json")
+
+    def test_malformed_json_is_a_config_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "models.json"
+        path.write_text("{ not json", encoding="utf-8")
+
+        with pytest.raises(ConfigError):
+            load_models_config(path)
+
+    def test_missing_required_field_is_a_config_error(self, tmp_path: Path) -> None:
+        payload = {"providers": {"groq": {"default_model": "m", "models": {}}}}
+
+        with pytest.raises(ConfigError):
+            load_models_config(write_json(tmp_path / "models.json", payload))
+
+    def test_an_unknown_field_is_rejected_so_typos_do_not_pass_silently(
+        self, tmp_path: Path
+    ) -> None:
+        # `max_token` instead of `max_tokens` would otherwise leave the model
+        # on its default budget, and nothing would say so.
+        payload = {
+            "providers": {
+                "groq": {
+                    "base_url": "https://api.groq.com/openai/v1",
+                    "default_model": "m",
+                    "models": {"m": {"max_token": 1500}},
+                },
+            },
+        }
+
+        with pytest.raises(ConfigError):
+            load_models_config(write_json(tmp_path / "models.json", payload))
+
+    def test_the_error_names_the_file_it_could_not_read(self, tmp_path: Path) -> None:
+        path = tmp_path / "models.json"
+        path.write_text("{ not json", encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="models.json"):
+            load_models_config(path)
+
+
+class TestLoadSandboxConfig:
+    def test_returns_the_frozen_contracts_sandbox_config(self, tmp_path: Path) -> None:
+        payload = {
+            "authorized_imports": ["math", "json"],
+            "allowed_directories": ["/testbed"],
+            "max_execution_time_seconds": 15,
+            "max_memory_mb": 256,
+        }
+        config = load_sandbox_config(write_json(tmp_path / "sandbox.json", payload))
+
+        assert config.authorized_imports == ["math", "json"]
+        assert config.allowed_directories == ["/testbed"]
+        assert config.max_execution_time_seconds == 15
+        assert config.max_memory_mb == 256
+
+    def test_missing_file_is_a_config_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError):
+            load_sandbox_config(tmp_path / "absent.json")
+
+    def test_wrong_field_type_is_a_config_error(self, tmp_path: Path) -> None:
+        payload = {"max_memory_mb": "a lot"}
+
+        with pytest.raises(ConfigError):
+            load_sandbox_config(write_json(tmp_path / "sandbox.json", payload))
+
+
+class TestCommittedConfigFiles:
+    """The files we ship must stay loadable — they are the defaults we run with."""
+
+    def test_repository_models_json_is_valid(self) -> None:
+        config = load_models_config(REPO_ROOT / "models.json")
+
+        assert "groq" in config.providers
+        assert "openrouter" in config.providers
+
+    def test_every_catalogued_provider_declares_its_default_model(self) -> None:
+        config = load_models_config(REPO_ROOT / "models.json")
+
+        for name, provider in config.providers.items():
+            assert provider.default_model in provider.models, (
+                f"{name}: default_model is not in its own models table"
+            )
+
+    def test_repository_sandbox_template_is_valid(self) -> None:
+        config = load_sandbox_config(REPO_ROOT / "sandbox_template.json")
+
+        assert config.authorized_imports
+        assert config.allowed_directories

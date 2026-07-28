@@ -1,0 +1,24 @@
+{
+  "providers": {
+    "groq": {
+      "base_url": "https://api.groq.com/openai/v1",
+      "default_model": "llama-3.3-70b-versatile",
+      "models": {
+        "llama-3.3-70b-versatile": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        }
+      }
+    },
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "default_model": "qwen/qwen3-235b-a22b-2507",
+      "models": {
+        "qwen/qwen3-235b-a22b-2507": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        }
+      }
+    }
+  }
+}
