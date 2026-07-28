@@ -1,7 +1,7 @@
 VENV_DIR = .venv
 SRC_DIR = src
 
-.PHONY: install run clean lint
+.PHONY: install run clean lint test check
 
 source $(VENV_DIR)/bin/activate:
 	@echo "Creating virtual environment..."
@@ -27,3 +27,13 @@ lint: install
 	@echo "Running standard linting..."
 	uv run flake8 src
 	uv run mypy src
+
+test: install
+	@echo "Running tests..."
+	uv run pytest -q
+
+# Run this before every push: it is the gate CONTRIBUTING.md refers to.
+check: install
+	@echo "Running ruff and tests..."
+	uv run ruff check .
+	uv run pytest -q

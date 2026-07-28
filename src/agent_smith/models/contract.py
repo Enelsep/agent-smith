@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -57,11 +57,11 @@ class SolutionOutput(BaseModel):
                                      description="Sum of output_tokens across all steps")
     total_time_seconds: float = Field(
         ..., description="Wall-clock time from agent start to finish")
-    steps: List[StepMetrics] = Field(
+    steps: list[StepMetrics] = Field(
         default_factory=list, description="Per-step metrics — one entry per agent iteration")
     system_prompt: str = Field(
         default="", description="Full system prompt sent to the LLM (for provenance checking)")
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None, description="Error message if the agent failed (None if successful)")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(
     ), description="ISO 8601 timestamp of when the solution was produced")
@@ -73,9 +73,9 @@ class SandboxConfig(BaseModel):
     Uses an allowlist approach: only imports in authorized_imports are permitted.
     Everything else is blocked by default.
     """
-    authorized_imports: List[str] = Field(
+    authorized_imports: list[str] = Field(
         default_factory=list, description="List of allowed import names (e.g., ['math', 'json', 're']). Glob patterns like 'math.*' are supported.")
-    allowed_directories: List[str] = Field(
+    allowed_directories: list[str] = Field(
         default_factory=list, description="List of filesystem paths the sandbox can access (e.g., ['/testbed', '/tmp/agent'])")
     max_execution_time_seconds: int = Field(
         default=30, description="Maximum wall-clock time for a single sandbox execution before timeout")
@@ -93,9 +93,9 @@ class MBPPTaskInput(BaseModel):
         ..., description="Natural language description of the function to implement")
     function_definition: str = Field(
         ..., description="Function signature (e.g., 'def solve(nums):')")
-    test_imports: List[str] = Field(
+    test_imports: list[str] = Field(
         default_factory=list, description="Import statements needed to run the public tests")
-    test_list: List[str] = Field(
+    test_list: list[str] = Field(
         default_factory=list, description="Public test assertions the solution must pass")
 
 

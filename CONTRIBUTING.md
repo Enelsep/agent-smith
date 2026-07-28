@@ -38,8 +38,9 @@ card spans two streams.
 - Keep them **small** (one card). Small PRs are what make cross-stream review realistic.
 - The **reviewer must be from a different stream** — rotate. Everyone has to understand all three
   streams for the live-modification exercise at defense.
-- Mergeable when: **1 approval**, **CI green** (`ruff` + `pytest`), and it **doesn't break
-  `exam_sandbox.sh`**.
+- Mergeable when: **1 approval**, **`make check` green** (`ruff` + `pytest`), and it **doesn't
+  break `exam_sandbox.sh`**. There is no remote CI — `make check` is the gate, and each of us runs
+  it before pushing.
 
 ## Documentation
 

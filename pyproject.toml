@@ -21,6 +21,18 @@ packages = ["src/agent_smith", "src/agent_mbpp", "src/agent_swebench"]
 [tool.hatch.build.targets.wheel.force-include]
 "mcp_tools_mbpp.py" = "mcp_tools_mbpp.py"
 "mcp_tools_swebench.py" = "mcp_tools_swebench.py"
+[tool.pytest.ini_options]
+# Without this, pytest run from the repo root also collects the tests of the
+# moulinette checkout that sits next to us locally, and dies on `import docker`.
+testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# contract.py mirrors the Pydantic contract the evaluation imposes on us. Its
+# timestamps are naive `datetime.now()` calls, exactly as in the reference file:
+# making them timezone-aware would change the serialized ISO string of a frozen
+# contract just to satisfy a lint rule.
+"src/agent_smith/models/contract.py" = ["DTZ005"]
+
 [tool.mypy]
 warn_return_any = true
 explicit_package_bases = true
