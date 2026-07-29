@@ -18,8 +18,6 @@ if TYPE_CHECKING:
 
     from .protocol import ExecRequest
 
-    # The worker end of the pipe: it sends results and receives requests.
-    # `None` is the shutdown sentinel the parent sends on close().
     WorkerConn = Connection[ExecResult, ExecRequest | None]
 
 MAX_OUTPUT_CHARS = 8_000
