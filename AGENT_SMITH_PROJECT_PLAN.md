@@ -232,10 +232,16 @@ subject actually calls — test them explicitly, not just the `sandbox` script).
 
 **`SETUP-2` · Freeze Pydantic contracts** · all three, 1h together · S · SETUP-1
 
-**Copy `moulinette/models_public.py` verbatim** into `src/agent_smith/models/contract.py` (its own
-header says students are meant to copy it; it is the exact file the moulinette imports to validate
-our output). Do **not** retype the models — a single renamed field fails
-`SolutionOutput.model_validate()` before any test runs. Derive our internal ones
+**Copy `moulinette/models_public.py`** into `src/agent_smith/models/contract.py` (its own header
+says students are meant to copy it; it is the exact file the moulinette imports to validate our
+output). Do **not** retype the models — a single renamed field fails
+`SolutionOutput.model_validate()` before any test runs.
+
+The property we hold, and now enforce, is **contract equivalence**, not file identity: the two
+files may differ in formatting and in how annotations are spelled (`list[str]` for `List[str]`,
+`str | None` for `Optional[str]`), as long as every model generates the same JSON schema. That is
+the level the moulinette reads us at, and `tests/test_contract_equivalence.py` compares it for all
+five models — skipping cleanly on machines where `moulinette/` is absent. Derive our internal ones
 (`ToolSpec`, `ExecutionResult`, `LLMResponse`, `AgentConfig`) alongside it, never on top of it.
 
 Two field-level traps to encode as tests, not code-review notes:

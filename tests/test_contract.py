@@ -1,6 +1,8 @@
 """Contract tests — lock the frozen Pydantic models the moulinette validates against.
 
-`contract.py` is a verbatim copy of `moulinette/models_public.py` and must not drift.
+`contract.py` is contract-equivalent to `moulinette/models_public.py`: the two files differ in
+formatting and in how the annotations are spelled, but generate the same JSON schema — which is
+what the moulinette reads. `tests/test_contract_equivalence.py` enforces that property.
 These tests fail loudly if a field is renamed, removed or retyped, and pin the two traps
 the moulinette is strict about:
   - `SolutionOutput.task_id` is a *string* (MBPP `task_id` is an int and must be stringified);
@@ -129,7 +131,7 @@ def test_required_solution_fields_are_enforced(missing: str) -> None:
         SolutionOutput.model_validate(data)
 
 
-# --- contract shape (guards against verbatim drift) -------------------------
+# --- contract shape (guards against field-level drift) ----------------------
 
 
 def test_solution_output_has_all_contract_fields() -> None:
