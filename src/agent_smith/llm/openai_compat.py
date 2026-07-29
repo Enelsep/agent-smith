@@ -5,6 +5,7 @@ endpoint comes from `--provider-url` by way of `ResolvedConfig`, never from a
 constant, so a new OpenAI-compatible provider costs a URL and nothing else.
 """
 
+import sys
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -101,6 +102,41 @@ class OpenAICompatProvider:
     def timeout(self) -> httpx.Timeout:
         """The timeout of the client this provider calls through."""
         return self._client.timeout
+
+    def validate_model(self) -> None:
+        """Check the configured model against what the endpoint says it serves.
+
+        Strict about a mismatch, tolerant about an absent catalogue. A wrong
+        model name fails every call that follows, so failing in 200 ms is worth
+        it. An unreachable `/models` proves nothing about the model, and
+        refusing to start would trade a certain failure for a hypothetical one.
+
+        Explicitly called at startup rather than done in `__init__`: building a
+        provider must not perform I/O.
+        """
+        try:
+            response = self._client.get(
+                self.models_url,
+                headers={"Authorization": f"Bearer {self._keys.api_key()}"},
+            )
+            response.raise_for_status()
+            served = [str(entry["id"]) for entry in response.json()["data"]]
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            self._warn(f"cannot list the models served by {self.base_url}: {exc}")
+            return
+
+        if not served:
+            self._warn(f"{self.base_url} lists no model at all")
+            return
+
+        if self.model not in served:
+            raise ConfigError(
+                f"model {self.model!r} is not served by {self.base_url}. "
+                f"Available: {', '.join(sorted(served))}"
+            )
+
+    def _warn(self, message: str) -> None:
+        print(f"warning: {message}; continuing without validation", file=sys.stderr)
 
     def complete(
         self,

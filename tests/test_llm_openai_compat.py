@@ -357,3 +357,70 @@ class TestCompleteErrors:
             provider.complete(_PROMPT)
         rendered = f"{caught.value} {caught.value.body_excerpt} {caught.value.headers}"
         assert "key-one" not in rendered
+
+
+def _models_provider(handler: Handler) -> OpenAICompatProvider:
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return provider_from_config(_config(), client=client)
+
+
+def _serving(*model_ids: str) -> Handler:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.groq.com/openai/v1/models"
+        return httpx.Response(200, json={"data": [{"id": i} for i in model_ids]})
+
+    return handler
+
+
+class TestValidateModel:
+    def test_a_model_the_endpoint_serves_passes_quietly(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        provider = _models_provider(_serving("llama-3.3-70b-versatile", "other"))
+        provider.validate_model()
+        assert capsys.readouterr().err == ""
+
+    def test_a_model_the_endpoint_does_not_serve_stops_the_run(self) -> None:
+        # A wrong name fails every call that follows: 200 ms now beats the
+        # whole wall-clock budget later.
+        provider = _models_provider(_serving("mixtral-8x7b", "gemma-7b"))
+        with pytest.raises(ConfigError) as caught:
+            provider.validate_model()
+        assert "llama-3.3-70b-versatile" in str(caught.value)
+        assert "mixtral-8x7b" in str(caught.value)
+
+    def test_an_endpoint_without_the_route_only_warns(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Local inference servers do not all implement /models, and a missing
+        # route proves nothing about the model.
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, text="not found")
+
+        _models_provider(handler).validate_model()
+        assert "warning" in capsys.readouterr().err
+
+    def test_an_unreachable_endpoint_only_warns(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout("too slow", request=request)
+
+        _models_provider(handler).validate_model()
+        assert "warning" in capsys.readouterr().err
+
+    def test_an_unexpected_payload_only_warns(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"models": ["llama-3.3-70b-versatile"]})
+
+        _models_provider(handler).validate_model()
+        assert "warning" in capsys.readouterr().err
+
+    def test_an_empty_catalogue_only_warns(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # An endpoint that answers but serves nothing has told us nothing.
+        _models_provider(_serving()).validate_model()
+        assert "warning" in capsys.readouterr().err
