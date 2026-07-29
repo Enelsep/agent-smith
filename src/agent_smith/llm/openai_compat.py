@@ -10,9 +10,10 @@ from collections.abc import Sequence
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from agent_smith.config import ConfigError, ResolvedConfig
+from agent_smith.llm.errors import ProviderError
 from agent_smith.llm.protocol import KeySource, Message
 from agent_smith.llm.response import LLMResponse
 
@@ -120,18 +121,59 @@ class OpenAICompatProvider:
             payload["max_tokens"] = effective_max_tokens
 
         started = time.perf_counter()
-        response = self._client.post(
-            self.completions_url,
-            json=payload,
-            headers={"Authorization": f"Bearer {self._keys.api_key()}"},
-        )
+        try:
+            response = self._client.post(
+                self.completions_url,
+                json=payload,
+                headers={"Authorization": f"Bearer {self._keys.api_key()}"},
+            )
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                f"{self.completions_url} did not answer in time",
+                is_timeout=True,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ProviderError(f"cannot reach {self.completions_url}: {exc}") from exc
         latency_ms = (time.perf_counter() - started) * 1000
+
+        if response.status_code != httpx.codes.OK:
+            raise ProviderError(
+                f"{self.completions_url} answered {response.status_code}",
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                body=response.text,
+            )
 
         return self._to_response(response, latency_ms)
 
     def _to_response(self, response: httpx.Response, latency_ms: float) -> LLMResponse:
-        parsed = _ChatCompletion.model_validate_json(response.content)
-        text = parsed.choices[0].message.content or ""
+        try:
+            parsed = _ChatCompletion.model_validate_json(response.content)
+        except ValidationError as exc:
+            raise ProviderError(
+                f"{self.completions_url} returned a body we cannot read: {exc}",
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                body=response.text,
+            ) from exc
+
+        if not parsed.choices:
+            raise ProviderError(
+                f"{self.completions_url} returned no choices",
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                body=response.text,
+            )
+
+        text = parsed.choices[0].message.content
+        if not text:
+            raise ProviderError(
+                f"{self.completions_url} returned an empty completion",
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                body=response.text,
+            )
+
         return LLMResponse(
             text=text,
             input_tokens=parsed.usage.prompt_tokens,

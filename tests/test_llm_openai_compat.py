@@ -6,13 +6,14 @@ Nothing reaches the network.
 """
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
 
 from agent_smith.config import ConfigError, ResolvedConfig
-from agent_smith.llm import LLMResponse, Message
+from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
@@ -20,6 +21,8 @@ from agent_smith.llm.openai_compat import (
     provider_from_config,
 )
 from agent_smith.models.contract import SandboxConfig
+
+Handler = Callable[[httpx.Request], httpx.Response]
 
 
 def _sandbox() -> SandboxConfig:
@@ -253,3 +256,104 @@ class TestCompleteResponse:
     def test_a_first_attempt_that_succeeds_reports_no_retries(self) -> None:
         sent: list[httpx.Request] = []
         assert _recording_provider(sent).complete(_PROMPT).retries == 0
+
+
+def _failing_provider(handler: Handler) -> OpenAICompatProvider:
+    """A provider whose transport runs the given handler."""
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return provider_from_config(_config(), client=client)
+
+
+def _responding_provider(
+    status_code: int,
+    body: dict[str, Any] | None = None,
+    text: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> OpenAICompatProvider:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if text is not None:
+            return httpx.Response(status_code, text=text, headers=headers)
+        return httpx.Response(
+            status_code, json=body or _completion_body(), headers=headers
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return provider_from_config(_config(), client=client)
+
+
+class TestCompleteErrors:
+    def test_a_timeout_is_flagged_so_core2_can_back_off(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("too slow", request=request)
+
+        with pytest.raises(ProviderError) as caught:
+            _failing_provider(handler).complete(_PROMPT)
+        assert caught.value.is_timeout is True
+        assert caught.value.status_code is None
+
+    def test_an_unreachable_host_carries_no_status_and_is_not_a_timeout(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("no route to host", request=request)
+
+        with pytest.raises(ProviderError) as caught:
+            _failing_provider(handler).complete(_PROMPT)
+        assert caught.value.status_code is None
+        assert caught.value.is_timeout is False
+
+    def test_a_rate_limit_carries_the_status_and_the_reset_headers(self) -> None:
+        # Exactly what CORE-2 needs to park the key until the reset.
+        provider = _responding_provider(
+            429,
+            text='{"error": "rate limit reached"}',
+            headers={"retry-after": "42", "x-ratelimit-reset-tokens": "7.66s"},
+        )
+        with pytest.raises(ProviderError) as caught:
+            provider.complete(_PROMPT)
+        assert caught.value.status_code == 429
+        assert caught.value.headers["retry-after"] == "42"
+        assert caught.value.headers["x-ratelimit-reset-tokens"] == "7.66s"
+        assert "rate limit reached" in caught.value.body_excerpt
+
+    def test_a_server_fault_carries_its_status(self) -> None:
+        with pytest.raises(ProviderError) as caught:
+            _responding_provider(503, text="upstream unavailable").complete(_PROMPT)
+        assert caught.value.status_code == 503
+        assert caught.value.is_timeout is False
+
+    def test_a_rejected_key_carries_its_status(self) -> None:
+        with pytest.raises(ProviderError) as caught:
+            _responding_provider(401, text="invalid api key").complete(_PROMPT)
+        assert caught.value.status_code == 401
+
+    def test_a_body_that_is_not_json_is_reported_rather_than_crashing(self) -> None:
+        with pytest.raises(ProviderError) as caught:
+            _responding_provider(200, text="<html>gateway</html>").complete(_PROMPT)
+        assert caught.value.status_code == 200
+
+    def test_missing_token_counts_are_an_error_not_a_zero(self) -> None:
+        # A run whose token accounting is absent is unusable, not degraded:
+        # a silent 0 would corrupt the totals instead of reporting the problem.
+        body = _completion_body()
+        del body["usage"]
+        with pytest.raises(ProviderError) as caught:
+            _responding_provider(200, body=body).complete(_PROMPT)
+        assert "usage" in str(caught.value)
+
+    def test_a_response_with_no_choices_is_an_error(self) -> None:
+        body = _completion_body()
+        body["choices"] = []
+        with pytest.raises(ProviderError):
+            _responding_provider(200, body=body).complete(_PROMPT)
+
+    def test_an_empty_completion_is_an_error(self) -> None:
+        with pytest.raises(ProviderError):
+            _responding_provider(200, body=_completion_body(content="")).complete(
+                _PROMPT
+            )
+
+    def test_no_api_key_ever_reaches_the_exception(self) -> None:
+        provider = _responding_provider(401, text="invalid api key")
+        with pytest.raises(ProviderError) as caught:
+            provider.complete(_PROMPT)
+        rendered = f"{caught.value} {caught.value.body_excerpt} {caught.value.headers}"
+        assert "key-one" not in rendered
