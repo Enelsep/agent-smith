@@ -6,15 +6,20 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pydantic",
+    "httpx>=0.25.0",
+    "python-dotenv>=1.0.0",
+]
+
+# Every dependency arrives with the ticket that writes the code importing it.
+# A project whose outbound surface is meant to be a single HTTP call cannot
+# afford to carry `requests` and `urllib3` in its closure for unwritten code.
+[dependency-groups]
+dev = [
     "mypy",
     "ruff",
     "pytest",
-	"mcp>=1.0.0",
-    "fastmcp>=0.1.0",
-    "httpx>=0.25.0",
-    "python-dotenv>=1.0.0",
-    "docker>=7.0.0",
-    ]
+]
+
 [project.scripts]
 sandbox = "agent_smith.cli.sandbox.main:main"
 [build-system]
