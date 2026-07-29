@@ -1,0 +1,10 @@
+[
+  {
+    "instance_id": "sympy__sympy-14711",
+    "problem_statement": "Vector zero vector multiplication raises TypeError\n\n```python\nfrom sympy.vector import CoordSys3D\nN = CoordSys3D('N')\nN.0 * N.i\n```\nExpected 0, got TypeError.",
+    "docker_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14711:latest",
+    "eval_script": "pytest sympy/vector/tests/test_vector.py",
+    "hints_text": "",
+    "repo": "sympy/sympy"
+  }
+]
