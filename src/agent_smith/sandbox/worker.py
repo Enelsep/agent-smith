@@ -8,8 +8,19 @@ import io
 import signal
 import time
 import traceback
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from .protocol import ExecResult, FinalAnswerSignal, Outcome
+
+if TYPE_CHECKING:
+    from multiprocessing.connection import Connection
+    from types import FrameType
+
+    from .protocol import ExecRequest
+
+    # The worker end of the pipe: it sends results and receives requests.
+    # `None` is the shutdown sentinel the parent sends on close().
+    WorkerConn = Connection[ExecResult, ExecRequest | None]
 
 MAX_OUTPUT_CHARS = 8_000
 
@@ -21,15 +32,15 @@ def _truncate(text: str) -> str:
     return text[:MAX_OUTPUT_CHARS] + f"\n[... truncated,{omitted} chars omitted ...]"
 
 
-def _on_alarm(signum, frame):
+def _on_alarm(signum: int, frame: FrameType | None) -> NoReturn:
     """SIGALRM handle: raise inside whatever line is currently running"""
     raise TimeoutError("Execution exceeded the sandbox time limit")
 
 
-def _build_namespace(final_answer_box: list) -> dict:
+def _build_namespace(final_answer_box: list[Any]) -> dict[str, Any]:
     """Create the persistent globals dict handed to exec()."""
 
-    def final_answer(value):
+    def final_answer(value: object) -> NoReturn:
         final_answer_box.append(value)
         raise FinalAnswerSignal(value)
 
@@ -41,7 +52,9 @@ def _build_namespace(final_answer_box: list) -> dict:
     }
 
 
-def _execute_once(code: str, namespace: dict, timeout: float, box: list) -> ExecResult:
+def _execute_once(
+    code: str, namespace: dict[str, Any], timeout: float, box: list[Any]
+) -> ExecResult:
     """Run one code block in the shared namespace and describe what happened"""
     out_buf, err_buf = io.StringIO(), io.StringIO()
     started = time.monotonic()
@@ -84,10 +97,10 @@ def _execute_once(code: str, namespace: dict, timeout: float, box: list) -> Exec
     )
 
 
-def worker_main(conn, timeout: float) -> None:
+def worker_main(conn: WorkerConn, timeout: float) -> None:
     """entry point for the child process. Loops until the pipe closes."""
     signal.signal(signal.SIGALRM, _on_alarm)
-    box: list = []
+    box: list[Any] = []
     namespace = _build_namespace(box)
 
     while True:

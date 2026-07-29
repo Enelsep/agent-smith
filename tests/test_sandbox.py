@@ -1,7 +1,8 @@
 from agent_smith.sandbox.process import Sandbox
+from agent_smith.sandbox.protocol import ExecResult
 
 
-def show(label, r):
+def show(label: str, r: ExecResult) -> None:
     print(f"\n--- {label}")
     print(f"    outcome  : {r.outcome.value}")
     if r.stdout:
@@ -14,7 +15,7 @@ def show(label, r):
     print(f"    duration : {r.duration_ms:.0f}ms")
 
 
-def main():
+def main() -> None:
     with Sandbox(timeout=2.0) as sb:
         show("1. define a variable", sb.execute("x = 41"))
         show("2. namespace persists across calls", sb.execute("print(x + 1)"))

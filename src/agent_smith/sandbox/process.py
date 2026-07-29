@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-from typing import Self
+from typing import TYPE_CHECKING
+
+# `typing.Self` only exists from 3.11 on, and this project targets 3.10.
+from typing_extensions import Self
 
 from .protocol import ExecRequest, ExecResult, Outcome
 from .worker import worker_main
+
+if TYPE_CHECKING:
+    from multiprocessing.connection import Connection
+    from types import TracebackType
+
+    # The parent end of the pipe: it sends requests (or the `None` shutdown
+    # sentinel) and receives results — the mirror image of `WorkerConn`.
+    ParentConn = Connection[ExecRequest | None, ExecResult]
 
 HARD_TIMEOUT_MARGIN = 5.0
 
@@ -16,7 +27,7 @@ class Sandbox:
         self.timeout = timeout
         self._ctx = mp.get_context("spawn")
         self._proc: mp.process.BaseProcess | None = None
-        self._conn = None
+        self._conn: ParentConn | None = None
         self.restarts = 0
 
     def start(self) -> None:
@@ -58,22 +69,32 @@ class Sandbox:
         self.start()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
     def execute(self, code: str) -> ExecResult:
         """Run one code block. Never raises on user-code failure."""
         if self._proc is None or not self._proc.is_alive():
             self.restart()
+        # `start()` always sets it; the check keeps the type narrow below and
+        # turns a would-be AttributeError into a clear failure.
+        conn = self._conn
+        if conn is None:
+            raise RuntimeError("sandbox has no live connection to its worker")
 
         try:
-            self._conn.send(ExecRequest(code=code))
+            conn.send(ExecRequest(code=code))
         except (BrokenPipeError, OSError):
             self.restart()
             return self._hard_timeout_result("worker was not reachable")
 
         deadline = self.timeout + HARD_TIMEOUT_MARGIN
-        if not self._conn.poll(deadline):
+        if not conn.poll(deadline):
             self.restart()
             return self._hard_timeout_result(
                 f"code did not return control after {deadline:.0f}s\
@@ -84,7 +105,7 @@ class Sandbox:
             )
 
         try:
-            return self._conn.recv()
+            return conn.recv()
         except (EOFError, OSError):
             self.restart()
             return self._hard_timeout_result("worker died mid-execution")
