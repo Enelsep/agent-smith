@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from typing import TYPE_CHECKING
-
-# `typing.Self` only exists from 3.11 on, and this project targets 3.10.
 from typing_extensions import Self
 
 from .protocol import ExecRequest, ExecResult, Outcome
@@ -12,9 +10,6 @@ from .worker import worker_main
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from types import TracebackType
-
-    # The parent end of the pipe: it sends requests (or the `None` shutdown
-    # sentinel) and receives results — the mirror image of `WorkerConn`.
     ParentConn = Connection[ExecRequest | None, ExecResult]
 
 HARD_TIMEOUT_MARGIN = 5.0
