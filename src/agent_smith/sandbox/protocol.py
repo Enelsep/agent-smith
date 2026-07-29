@@ -17,13 +17,13 @@ class Outcome(str, Enum):
 
 @dataclass
 class ExecRequest:
-    """Parent -> worker communication."""
+    """process --> worker communication pipeline."""
     code: str
 
 
 @dataclass
 class ExecResult:
-    """Worker -> parent communication."""
+    """Worker --> process communication pipeline."""
     outcome: Outcome
     stdout: str = ""
     stderr: str = ""
