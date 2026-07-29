@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from typing import TYPE_CHECKING
+
 from typing_extensions import Self
 
 from .protocol import ExecRequest, ExecResult, Outcome
@@ -10,6 +11,7 @@ from .worker import worker_main
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from types import TracebackType
+
     ParentConn = Connection[ExecRequest | None, ExecResult]
 
 HARD_TIMEOUT_MARGIN = 5.0
