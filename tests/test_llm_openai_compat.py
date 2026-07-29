@@ -118,7 +118,7 @@ class TestConstruction:
             model="llama-3.3-70b-versatile",
             key_source=StaticKeySource(["key-one"]),
         )
-        assert provider.timeout.read == DEFAULT_TIMEOUT_SECONDS
+        assert provider.timeout == DEFAULT_TIMEOUT_SECONDS
 
     def test_an_explicit_timeout_reaches_the_client(self) -> None:
         provider = OpenAICompatProvider(
@@ -127,7 +127,7 @@ class TestConstruction:
             key_source=StaticKeySource(["key-one"]),
             timeout=12.5,
         )
-        assert provider.timeout.read == 12.5
+        assert provider.timeout == 12.5
 
 
 def _completion_body(

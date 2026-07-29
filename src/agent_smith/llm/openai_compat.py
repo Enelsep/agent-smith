@@ -99,9 +99,18 @@ class OpenAICompatProvider:
         self._client = client or httpx.Client(timeout=timeout)
 
     @property
-    def timeout(self) -> httpx.Timeout:
-        """The timeout of the client this provider calls through."""
-        return self._client.timeout
+    def timeout(self) -> float | None:
+        """The read timeout of the client this provider calls through.
+
+        The read timeout rather than the whole `httpx.Timeout`: it is the one
+        that fires on the failure this guards against, an endpoint that accepts
+        the connection and then goes quiet. Returning the httpx object would
+        also put a transport type on the one public surface whose purpose is to
+        keep it contained. `None` means the injected client was built without
+        one.
+        """
+        read_timeout = self._client.timeout.read
+        return None if read_timeout is None else float(read_timeout)
 
     def validate_model(self) -> None:
         """Check the configured model against what the endpoint says it serves.

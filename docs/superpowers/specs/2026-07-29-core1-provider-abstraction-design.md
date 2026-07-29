@@ -79,12 +79,18 @@ Messages are a `TypedDict`, not a bare `dict[str, str]`:
 
 ```python
 class Message(TypedDict):
-    role: str
+    role: Literal["system", "user", "assistant"]
     content: str
 ```
 
 Under `disallow_untyped_defs` and `warn_return_any`, this gives mypy something to check at the
 call site. A generic dict says nothing.
+
+`role` is a `Literal` for the same reason. No endpoint rejects a misspelt role: it is forwarded,
+and the model answers something plausible to a conversation we did not mean to send. The three
+values are what a ReAct loop needs, observations coming back as user turns. Native tool-calling
+would want a `tool` role, but it would equally want `tool_calls` and `tool_call_id` in this
+TypedDict — so the day the Literal is too narrow, the shape is too narrow with it.
 
 ## Construction
 
