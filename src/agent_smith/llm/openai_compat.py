@@ -5,17 +5,48 @@ endpoint comes from `--provider-url` by way of `ResolvedConfig`, never from a
 constant, so a new OpenAI-compatible provider costs a URL and nothing else.
 """
 
+import time
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
+from pydantic import BaseModel
 
 from agent_smith.config import ConfigError, ResolvedConfig
-from agent_smith.llm.protocol import KeySource
+from agent_smith.llm.protocol import KeySource, Message
+from agent_smith.llm.response import LLMResponse
 
 # A guard against a hung socket, not a budget. MBPP allows 120 s of wall clock
 # for a task that may take several iterations, so a request that has been
 # silent for 30 s has already cost too much. Budgets are CORE-5 and SWE-6.
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+class _Message(BaseModel):
+    content: str | None = None
+
+
+class _Choice(BaseModel):
+    message: _Message
+
+
+class _Usage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class _ChatCompletion(BaseModel):
+    """One vendor's wire format, not our contract — hence private.
+
+    `usage` is required on purpose. A completion whose token counts are absent
+    is not a degraded result but an unusable one: the contract requires
+    `total_input_tokens` to equal the sum of the per-step counts, so a silent
+    zero would corrupt the record rather than report the problem.
+    """
+
+    choices: list[_Choice]
+    usage: _Usage
+    model: str | None = None
 
 
 class StaticKeySource:
@@ -69,6 +100,46 @@ class OpenAICompatProvider:
     def timeout(self) -> httpx.Timeout:
         """The timeout of the client this provider calls through."""
         return self._client.timeout
+
+    def complete(
+        self,
+        messages: Sequence[Message],
+        stop: list[str] | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        """Ask for one completion. One request, no retries."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": list(messages),
+        }
+        effective_stop = self._stop if stop is None else stop
+        if effective_stop:
+            payload["stop"] = effective_stop
+        effective_max_tokens = self._max_tokens if max_tokens is None else max_tokens
+        if effective_max_tokens is not None:
+            payload["max_tokens"] = effective_max_tokens
+
+        started = time.perf_counter()
+        response = self._client.post(
+            self.completions_url,
+            json=payload,
+            headers={"Authorization": f"Bearer {self._keys.api_key()}"},
+        )
+        latency_ms = (time.perf_counter() - started) * 1000
+
+        return self._to_response(response, latency_ms)
+
+    def _to_response(self, response: httpx.Response, latency_ms: float) -> LLMResponse:
+        parsed = _ChatCompletion.model_validate_json(response.content)
+        text = parsed.choices[0].message.content or ""
+        return LLMResponse(
+            text=text,
+            input_tokens=parsed.usage.prompt_tokens,
+            output_tokens=parsed.usage.completion_tokens,
+            latency_ms=latency_ms,
+            model=parsed.model or self.model,
+            api_url=self.completions_url,
+        )
 
 
 def provider_from_config(

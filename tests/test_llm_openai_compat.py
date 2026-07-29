@@ -5,10 +5,14 @@ request we build and the response we parse are exercised rather than faked.
 Nothing reaches the network.
 """
 
+import json
+from typing import Any
+
 import httpx
 import pytest
 
 from agent_smith.config import ConfigError, ResolvedConfig
+from agent_smith.llm import LLMResponse, Message
 from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
@@ -109,3 +113,143 @@ class TestConstruction:
             timeout=12.5,
         )
         assert provider.timeout.read == 12.5
+
+
+def _completion_body(
+    content: str = "print(1)",
+    prompt_tokens: int = 12,
+    completion_tokens: int = 3,
+    model: str = "llama-3.3-70b-versatile",
+) -> dict[str, Any]:
+    return {
+        "model": model,
+        "choices": [{"message": {"role": "assistant", "content": content}}],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        },
+    }
+
+
+def _recording_provider(
+    sent: list[httpx.Request],
+    body: dict[str, Any] | None = None,
+    status_code: int = 200,
+    **overrides: object,
+) -> OpenAICompatProvider:
+    """A provider whose transport records what it was asked to send."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(status_code, json=body or _completion_body())
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return provider_from_config(_config(**overrides), client=client)
+
+
+_PROMPT: list[Message] = [{"role": "user", "content": "add two numbers"}]
+
+
+class TestCompleteRequest:
+    def test_it_posts_to_the_chat_completions_route_of_the_given_base_url(self) -> None:
+        sent: list[httpx.Request] = []
+        _recording_provider(sent).complete(_PROMPT)
+        assert sent[0].method == "POST"
+        assert str(sent[0].url) == ("https://api.groq.com/openai/v1/chat/completions")
+
+    def test_it_authenticates_with_the_key_the_source_supplies(self) -> None:
+        sent: list[httpx.Request] = []
+        _recording_provider(sent).complete(_PROMPT)
+        assert sent[0].headers["authorization"] == "Bearer key-one"
+
+    def test_it_sends_the_model_and_the_messages(self) -> None:
+        sent: list[httpx.Request] = []
+        _recording_provider(sent).complete(_PROMPT)
+        payload = json.loads(sent[0].content)
+        assert payload["model"] == "llama-3.3-70b-versatile"
+        assert payload["messages"] == [{"role": "user", "content": "add two numbers"}]
+
+    def test_the_configured_defaults_apply_when_the_caller_says_nothing(self) -> None:
+        sent: list[httpx.Request] = []
+        _recording_provider(sent).complete(_PROMPT)
+        payload = json.loads(sent[0].content)
+        assert payload["stop"] == ["Observation:"]
+        assert payload["max_tokens"] == 1500
+
+    def test_explicit_arguments_override_the_configured_defaults(self) -> None:
+        sent: list[httpx.Request] = []
+        _recording_provider(sent).complete(_PROMPT, stop=["END"], max_tokens=64)
+        payload = json.loads(sent[0].content)
+        assert payload["stop"] == ["END"]
+        assert payload["max_tokens"] == 64
+
+    def test_absent_settings_are_omitted_rather_than_sent_as_null(self) -> None:
+        # Not every OpenAI-compatible server treats a null the way it treats an
+        # absent key.
+        sent: list[httpx.Request] = []
+        provider = _recording_provider(sent, stop=[], max_tokens=None)
+        provider.complete(_PROMPT)
+        payload = json.loads(sent[0].content)
+        assert "stop" not in payload
+        assert "max_tokens" not in payload
+
+    def test_the_key_is_read_again_for_every_request(self) -> None:
+        # The seam CORE-2 attaches to: a pool must be free to hand out a
+        # different key from one call to the next.
+        class RotatingKeys:
+            def __init__(self) -> None:
+                self._calls = 0
+
+            def api_key(self) -> str:
+                self._calls += 1
+                return f"key-{self._calls}"
+
+        sent: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return httpx.Response(200, json=_completion_body())
+
+        provider = OpenAICompatProvider(
+            base_url="https://api.groq.com/openai/v1",
+            model="llama-3.3-70b-versatile",
+            key_source=RotatingKeys(),
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        provider.complete(_PROMPT)
+        provider.complete(_PROMPT)
+        assert sent[0].headers["authorization"] == "Bearer key-1"
+        assert sent[1].headers["authorization"] == "Bearer key-2"
+
+
+class TestCompleteResponse:
+    def test_it_returns_the_generated_text_and_the_token_counts(self) -> None:
+        sent: list[httpx.Request] = []
+        response = _recording_provider(sent).complete(_PROMPT)
+        assert isinstance(response, LLMResponse)
+        assert response.text == "print(1)"
+        assert response.input_tokens == 12
+        assert response.output_tokens == 3
+
+    def test_it_measures_the_call_and_names_the_endpoint(self) -> None:
+        sent: list[httpx.Request] = []
+        response = _recording_provider(sent).complete(_PROMPT)
+        assert response.latency_ms > 0
+        assert response.api_url == ("https://api.groq.com/openai/v1/chat/completions")
+
+    def test_it_reports_the_model_the_server_says_it_served(self) -> None:
+        sent: list[httpx.Request] = []
+        body = _completion_body(model="llama-3.3-70b-versatile-0125")
+        response = _recording_provider(sent, body=body).complete(_PROMPT)
+        assert response.model == "llama-3.3-70b-versatile-0125"
+
+    def test_it_falls_back_to_the_configured_model_when_none_is_echoed(self) -> None:
+        sent: list[httpx.Request] = []
+        body = _completion_body()
+        del body["model"]
+        response = _recording_provider(sent, body=body).complete(_PROMPT)
+        assert response.model == "llama-3.3-70b-versatile"
+
+    def test_a_first_attempt_that_succeeds_reports_no_retries(self) -> None:
+        sent: list[httpx.Request] = []
+        assert _recording_provider(sent).complete(_PROMPT).retries == 0
