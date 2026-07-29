@@ -38,9 +38,22 @@ card spans two streams.
 - Keep them **small** (one card). Small PRs are what make cross-stream review realistic.
 - The **reviewer must be from a different stream** — rotate. Everyone has to understand all three
   streams for the live-modification exercise at defense.
-- Mergeable when: **1 approval**, **`make check` green** (`ruff` + `pytest`), and it **doesn't
+- Mergeable when: **1 approval**, **`make check` green** (`ruff check` + `ruff format --check` +
+  `mypy` over the whole repository + `pytest`), and it **doesn't
   break `exam_sandbox.sh`**. There is no remote CI — `make check` is the gate, and each of us runs
   it before pushing.
+
+## Formatting
+
+- **`ruff format` is the formatter, and `make check` enforces it.** Run `uv run ruff format .`
+  before pushing; if you let your editor format on save, point it at Ruff so it agrees with the
+  gate. Nothing else — `black` is not a project dependency, and `flake8` lints at 79 columns where
+  we are at 88.
+- The tree was reformatted in one dedicated commit. Run this **once per clone** so `git blame`
+  keeps crediting the real authors: `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+  GitHub reads the file on its own.
+- If you ever need another repo-wide reformat, give it its **own commit** and add its SHA to
+  `.git-blame-ignore-revs` in the same PR.
 
 ## Documentation
 

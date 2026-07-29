@@ -1,0 +1,9 @@
+# Revisions git blame should skip: formatting only, no behaviour change.
+# Without this, blame credits every line to the reformat instead of its author.
+#
+# Enable it once per clone:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub reads this file on its own, no setup needed there.
+
+# style: format the tree with ruff format
+72aa5ea7ae54c27962d871dc43e53e3028e53e5a

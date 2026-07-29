@@ -28,7 +28,8 @@ clean:
 lint: install
 	@echo "Linting and type-checking..."
 	uv run ruff check .
-	uv run mypy src
+	uv run ruff format --check .
+	uv run mypy .
 
 test: install
 	@echo "Running tests..."

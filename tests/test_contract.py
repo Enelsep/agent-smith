@@ -6,6 +6,7 @@ the moulinette is strict about:
   - `SolutionOutput.task_id` is a *string* (MBPP `task_id` is an int and must be stringified);
   - an int `task_id` is rejected before any correctness check even runs.
 """
+
 import json
 
 import pytest
@@ -62,7 +63,8 @@ def _sample_solution() -> dict:
 
 # --- round trip -------------------------------------------------------------
 
-def test_solution_output_roundtrips_through_json():
+
+def test_solution_output_roundtrips_through_json() -> None:
     data = _sample_solution()
     # exactly what the moulinette does before scoring:
     obj = SolutionOutput.model_validate(data)
@@ -76,7 +78,7 @@ def test_solution_output_roundtrips_through_json():
     assert reloaded.system_prompt.startswith("You are")
 
 
-def test_solution_output_serialises_task_id_as_json_string():
+def test_solution_output_serialises_task_id_as_json_string() -> None:
     obj = SolutionOutput.model_validate(_sample_solution())
     dumped = json.loads(obj.model_dump_json())
     assert isinstance(dumped["task_id"], str)
@@ -84,7 +86,8 @@ def test_solution_output_serialises_task_id_as_json_string():
 
 # --- the task_id trap -------------------------------------------------------
 
-def test_task_id_is_string_when_built_from_mbpp_int():
+
+def test_task_id_is_string_when_built_from_mbpp_int() -> None:
     mbpp = MBPPTaskInput(
         task_id=282,
         task_definition="Add two numbers",
@@ -96,7 +99,7 @@ def test_task_id_is_string_when_built_from_mbpp_int():
     assert SolutionOutput.model_validate(payload).task_id == "282"
 
 
-def test_int_task_id_is_rejected():
+def test_int_task_id_is_rejected() -> None:
     bad = {**_sample_solution(), "task_id": 282}  # int, not str
     with pytest.raises(ValidationError):
         SolutionOutput.model_validate(bad)
@@ -104,15 +107,22 @@ def test_int_task_id_is_rejected():
 
 # --- required fields --------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "missing",
     [
-        "task_id", "benchmark", "success", "solution", "iterations",
-        "total_requests", "total_input_tokens", "total_output_tokens",
+        "task_id",
+        "benchmark",
+        "success",
+        "solution",
+        "iterations",
+        "total_requests",
+        "total_input_tokens",
+        "total_output_tokens",
         "total_time_seconds",
     ],
 )
-def test_required_solution_fields_are_enforced(missing):
+def test_required_solution_fields_are_enforced(missing: str) -> None:
     data = _sample_solution()
     del data[missing]
     with pytest.raises(ValidationError):
@@ -121,19 +131,38 @@ def test_required_solution_fields_are_enforced(missing):
 
 # --- contract shape (guards against verbatim drift) -------------------------
 
-def test_solution_output_has_all_contract_fields():
+
+def test_solution_output_has_all_contract_fields() -> None:
     expected = {
-        "task_id", "benchmark", "success", "solution", "iterations",
-        "total_requests", "total_input_tokens", "total_output_tokens",
-        "total_time_seconds", "steps", "system_prompt", "error", "timestamp",
+        "task_id",
+        "benchmark",
+        "success",
+        "solution",
+        "iterations",
+        "total_requests",
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_time_seconds",
+        "steps",
+        "system_prompt",
+        "error",
+        "timestamp",
     }
     assert expected <= set(SolutionOutput.model_fields)
 
 
-def test_step_metrics_has_all_contract_fields():
+def test_step_metrics_has_all_contract_fields() -> None:
     expected = {
-        "step", "input_tokens", "output_tokens", "request_time_ms", "timestamp",
-        "api_url", "model_name", "llm_output", "sandbox_input", "sandbox_output",
+        "step",
+        "input_tokens",
+        "output_tokens",
+        "request_time_ms",
+        "timestamp",
+        "api_url",
+        "model_name",
+        "llm_output",
+        "sandbox_input",
+        "sandbox_output",
         "retries",
     }
     assert expected <= set(StepMetrics.model_fields)
@@ -141,24 +170,31 @@ def test_step_metrics_has_all_contract_fields():
 
 # --- defaults ---------------------------------------------------------------
 
-def test_step_metrics_optional_defaults():
+
+def test_step_metrics_optional_defaults() -> None:
     step = StepMetrics(step=1, input_tokens=10, output_tokens=5, request_time_ms=1.0)
     assert step.retries == 0
     assert step.api_url == "" and step.model_name == ""
-    assert step.llm_output == "" and step.sandbox_input == "" and step.sandbox_output == ""
+    assert (
+        step.llm_output == "" and step.sandbox_input == "" and step.sandbox_output == ""
+    )
     assert step.timestamp  # auto ISO timestamp populated
 
 
-def test_solution_output_defaults():
+def test_solution_output_defaults() -> None:
     obj = SolutionOutput.model_validate(
-        {k: v for k, v in _sample_solution().items() if k not in ("steps", "system_prompt")}
+        {
+            k: v
+            for k, v in _sample_solution().items()
+            if k not in ("steps", "system_prompt")
+        }
     )
     assert obj.steps == []
     assert obj.system_prompt == ""
     assert obj.error is None
 
 
-def test_sandbox_config_defaults():
+def test_sandbox_config_defaults() -> None:
     cfg = SandboxConfig()
     assert cfg.max_execution_time_seconds == 30
     assert cfg.max_memory_mb == 512
@@ -167,7 +203,8 @@ def test_sandbox_config_defaults():
 
 # --- SWE-bench input smoke --------------------------------------------------
 
-def test_swebench_task_input_optional_fields():
+
+def test_swebench_task_input_optional_fields() -> None:
     task = SWEBenchTaskInput(
         instance_id="sympy__sympy-14711",
         problem_statement="...",
