@@ -1,7 +1,8 @@
 VENV_DIR = .venv
 SRC_DIR = src
+FIXTURES_DIR = tests/fixtures
 
-.PHONY: install run clean lint test check
+.PHONY: install run clean lint test check dev-mbpp dev-swe
 
 source $(VENV_DIR)/bin/activate:
 	@echo "Creating virtual environment..."
@@ -14,6 +15,14 @@ install: $(VENV_DIR)/bin/activate
 run: install
 	@echo "Running Agent Smith..."
 	uv run python3 main.py
+
+dev-mbpp: install
+	@echo "Running MBPP development harness..."
+	uv run python -m agent_mbpp --task-file $(FIXTURES_DIR)/mbpp_tasks.json --output solution.json --model-name qwen/qwen3-235b-a22b-2507 --provider-url https://openrouter.ai/api/v1
+
+dev-swe: install
+	@echo "Running SWE-bench development harness..."
+	uv run python -m agent_swebench --task-file $(FIXTURES_DIR)/swebench_tasks.json --output solution.json --model-name qwen/qwen3-235b-a22b-2507 --provider-url https://openrouter.ai/api/v1
 
 clean:
 	@echo "Cleaning up temporary files and caches..."
