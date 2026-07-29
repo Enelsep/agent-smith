@@ -199,13 +199,23 @@ anti-cheat signal — an HTTP client *could* be used to fetch solutions. Ours ca
 inference call is HTTP. So the goal is not to dodge the match but to keep the surface small enough
 to be read as legitimate at a glance.
 
-Three files mention the client, and no more:
+Four files match the pattern, and no more:
 
-- `src/agent_smith/llm/openai_compat.py` — the only production module that imports it;
+- `src/agent_smith/llm/openai_compat.py` — the only production module that makes HTTP requests;
 - `tests/test_llm_openai_compat.py` — every wire test, deliberately in one file rather than eight;
-- the import-boundary test that enforces the first point.
+- `tests/test_llm_import_boundary.py` — the test that enforces the first point;
+- `src/agent_smith/config/keys.py` — `from urllib.parse import urlparse`, which parses the
+  provider URL into a host. It matches the pattern because the pattern is a substring search, but
+  it opens no connection.
 
-Plus one README line stating that our only outbound HTTP is the inference call.
+That last one sets the shape of the boundary test: it cannot ban the `urllib` package outright,
+or it would fail on correct, already-merged code. It bans HTTP *clients* — `httpx` outside the
+provider module, plus `requests`, `http.client` and `urllib.request` anywhere — while allowing
+`urllib.parse`. That is the same distinction a reviewer makes by eye, so it is the one worth
+encoding.
+
+Plus a README line stating that our only outbound HTTP is the inference call, and that the
+`urllib.parse` import parses URLs rather than fetching them.
 
 We do **not** build the module name dynamically to slip past the grep. It would work, and it would
 be the worst decision available: a legitimate use disguised as evasion, found by a reviewer who was
@@ -226,7 +236,8 @@ client is exercised — request construction and response parsing included — r
   different `Authorization` headers across two `complete()` calls. This is what guarantees
   rotation can be added without reopening `openai_compat.py`.
 - **`validate_model`** — all five outcomes.
-- **Import boundary** — no module outside `openai_compat.py` imports the HTTP client.
+- **Import boundary** — no module outside `openai_compat.py` imports an HTTP client, with
+  `urllib.parse` explicitly allowed and `urllib.request` explicitly not.
 
 ## Deferred
 
