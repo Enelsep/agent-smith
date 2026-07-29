@@ -16,6 +16,11 @@ class ProviderError(Exception):
     `headers` are the *response* headers: that is where `retry-after` and the
     rate-limit resets live, and it means a request's `Authorization` header
     cannot travel inside this exception. No API key is stored here.
+
+    Header names are lowercased on the way in. HTTP header lookup is
+    case-insensitive, but this is a plain `dict` and would not be: rather than
+    leave CORE-2 to guess which casing the endpoint sent, the keys are
+    normalised once here and `headers["retry-after"]` always works.
     """
 
     def __init__(
@@ -29,6 +34,8 @@ class ProviderError(Exception):
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
-        self.headers: Mapping[str, str] = dict(headers or {})
+        self.headers: Mapping[str, str] = {
+            name.lower(): value for name, value in (headers or {}).items()
+        }
         self.body_excerpt = body[:BODY_EXCERPT_LIMIT]
         self.is_timeout = is_timeout

@@ -30,6 +30,12 @@ class TestProviderError:
         assert error.headers["retry-after"] == "30"
         assert error.body_excerpt == '{"error": "slow down"}'
 
+    def test_header_names_are_lowercased_so_core2_needs_no_guess(self) -> None:
+        # HTTP header lookup is case-insensitive; a plain dict is not. CORE-2
+        # reads these without knowing what casing the endpoint chose.
+        error = ProviderError("rate limited", headers={"Retry-After": "30"})
+        assert error.headers["retry-after"] == "30"
+
     def test_a_timeout_is_flagged_rather_than_inferred_from_a_message(self) -> None:
         assert ProviderError("timed out", is_timeout=True).is_timeout is True
 

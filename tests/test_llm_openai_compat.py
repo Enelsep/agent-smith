@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from agent_smith.config import ConfigError, ResolvedConfig
-from agent_smith.llm import LLMResponse, Message, ProviderError
+from agent_smith.llm import LLMProvider, LLMResponse, Message, ProviderError
 from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
@@ -68,6 +68,18 @@ class TestStaticKeySource:
     def test_no_key_at_all_is_a_configuration_fault(self) -> None:
         with pytest.raises(ConfigError):
             StaticKeySource([])
+
+
+def test_the_provider_satisfies_the_protocol_the_rest_of_the_system_imports() -> None:
+    """Without an annotation somewhere, a Protocol checks nothing.
+
+    mypy verifies structural conformance where a concrete type is assigned to
+    the Protocol, and nowhere else. This annotation is that place: it is what
+    stops `complete()` drifting out of the contract CORE-2 and CORE-4 code
+    against. The assertion is incidental; the type annotation is the test.
+    """
+    provider: LLMProvider = provider_from_config(_config(), client=_exploding_client())
+    assert provider.complete is not None
 
 
 class TestConstruction:
