@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 from dataclasses import dataclass  # ,field <- for truncated: bool later
-from typing import Optional
 from enum import Enum
 
 
@@ -18,17 +18,19 @@ class Outcome(str, Enum):
 @dataclass
 class ExecRequest:
     """process --> worker communication pipeline."""
+
     code: str
 
 
 @dataclass
 class ExecResult:
     """Worker --> process communication pipeline."""
+
     outcome: Outcome
     stdout: str = ""
     stderr: str = ""
-    error: Optional[str] = None
-    final_answer: Optional[str] = None
+    error: str | None = None
+    final_answer: str | None = None
     duration_ms: float = 0.0
 
     @property

@@ -8,7 +8,6 @@ import io
 import signal
 import time
 import traceback
-from typing import Dict, List
 
 from .protocol import ExecResult, FinalAnswerSignal, Outcome
 
@@ -19,8 +18,7 @@ def _truncate(text: str) -> str:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text
     omitted = len(text) - MAX_OUTPUT_CHARS
-    return text[:MAX_OUTPUT_CHARS] + "\n[... truncated,"\
-                                     f"{omitted} chars omitted ...]"
+    return text[:MAX_OUTPUT_CHARS] + f"\n[... truncated,{omitted} chars omitted ...]"
 
 
 def _on_alarm(signum, frame):
@@ -28,7 +26,7 @@ def _on_alarm(signum, frame):
     raise TimeoutError("Execution exceeded the sandbox time limit")
 
 
-def _build_namespace(final_answer_box: list) -> Dict:
+def _build_namespace(final_answer_box: list) -> dict:
     """Create the persistent globals dict handed to exec()."""
 
     def final_answer(value):
@@ -43,8 +41,7 @@ def _build_namespace(final_answer_box: list) -> Dict:
     }
 
 
-def _execute_once(code: str, namespace: dict,
-                  timeout: float, box: list) -> ExecResult:
+def _execute_once(code: str, namespace: dict, timeout: float, box: list) -> ExecResult:
     """Run one code block in the shared namespace and describe what happened"""
     out_buf, err_buf = io.StringIO(), io.StringIO()
     started = time.monotonic()
@@ -55,9 +52,8 @@ def _execute_once(code: str, namespace: dict,
 
     try:
         signal.setitimer(signal.ITIMER_REAL, timeout)
-        with contextlib.redirect_stdout(out_buf), \
-             contextlib.redirect_stderr(err_buf):
-            exec(code, namespace)
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            exec(code, namespace)  # noqa: S102
 
     except FinalAnswerSignal:
         outcome = Outcome.FINAL_ANSWER
@@ -71,7 +67,7 @@ def _execute_once(code: str, namespace: dict,
         outcome = Outcome.SHUTDOWN
         error = f"{type(exc).__name__}: {exc}"
 
-    except Exception:
+    except Exception:  # noqa: BLE001
         outcome = Outcome.ERROR
         error = "".join(traceback.format_exc(limit=8))
 
@@ -91,7 +87,7 @@ def _execute_once(code: str, namespace: dict,
 def worker_main(conn, timeout: float) -> None:
     """entry point for the child process. Loops until the pipe closes."""
     signal.signal(signal.SIGALRM, _on_alarm)
-    box: List = []
+    box: list = []
     namespace = _build_namespace(box)
 
     while True:

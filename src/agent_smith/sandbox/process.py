@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-from typing import Optional
+from typing import Self
 
 from .protocol import ExecRequest, ExecResult, Outcome
 from .worker import worker_main
@@ -15,7 +15,7 @@ class Sandbox:
     def __init__(self, timeout: float = 30.0):
         self.timeout = timeout
         self._ctx = mp.get_context("spawn")
-        self._proc: Optional[mp.process.BaseProcess] = None
+        self._proc: mp.process.BaseProcess | None = None
         self._conn = None
         self.restarts = 0
 
@@ -54,7 +54,7 @@ class Sandbox:
                 pass
         self._kill()
 
-    def __enter__(self) -> "Sandbox":
+    def __enter__(self) -> Self:
         self.start()
         return self
 
