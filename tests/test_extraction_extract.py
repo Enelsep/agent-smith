@@ -67,6 +67,17 @@ def test_a_malformed_tool_call_names_its_strategy() -> None:
     assert result.failure
 
 
+def test_a_spent_repair_is_reported_as_something_i_did() -> None:
+    # The note is read back inside "after I …", so every note has to be a verb
+    # phrase. This is the one produced while matching rather than by repair.py.
+    result = extract_code("```python\ndef f(:\n", step=1)
+
+    assert result.failure == (
+        "Your fenced block still does not parse after I took the rest of the "
+        "message, because the code fence was never closed."
+    )
+
+
 def test_an_argument_name_python_cannot_spell_keeps_the_call_whole() -> None:
     # Rendered as a keyword argument this is a SyntaxError, and the python
     # repair mistakes the assignment for prose: it drops the line and leaves a

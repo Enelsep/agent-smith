@@ -87,7 +87,7 @@ def fenced(text: str, _step: int) -> Candidate | None:
     if closing is None:
         return Candidate(
             rest.strip(),
-            "the code fence was never closed, so I took the rest of the message",
+            "took the rest of the message, because the code fence was never closed",
         )
     return Candidate(rest[: closing.start()].strip())
 
