@@ -18,7 +18,6 @@ from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
     StaticKeySource,
-    provider_from_config,
 )
 from agent_smith.models.contract import SandboxConfig
 
@@ -57,6 +56,23 @@ def _exploding_client() -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def _provider(config: ResolvedConfig, *, client: httpx.Client) -> OpenAICompatProvider:
+    """Build the provider directly, the way these isolation tests need it.
+
+    These tests exercise `OpenAICompatProvider`'s own contract — one request,
+    no retries — so they construct it themselves rather than through
+    `provider_from_config`, which also assembles the retry policy around it.
+    """
+    return OpenAICompatProvider(
+        base_url=config.base_url,
+        model=config.model_name,
+        key_source=StaticKeySource(config.api_keys),
+        stop=list(config.stop),
+        max_tokens=config.max_tokens,
+        client=client,
+    )
+
+
 class TestStaticKeySource:
     def test_it_serves_the_first_key_of_the_pool(self) -> None:
         assert StaticKeySource(["first", "second"]).api_key() == "first"
@@ -78,7 +94,7 @@ def test_the_provider_satisfies_the_protocol_the_rest_of_the_system_imports() ->
     stops `complete()` drifting out of the contract CORE-2 and CORE-4 code
     against. The assertion is incidental; the type annotation is the test.
     """
-    provider: LLMProvider = provider_from_config(_config(), client=_exploding_client())
+    provider: LLMProvider = _provider(_config(), client=_exploding_client())
     assert provider.complete is not None
 
 
@@ -94,7 +110,7 @@ class TestConstruction:
         )
 
     def test_it_reads_its_endpoint_and_defaults_off_the_resolved_config(self) -> None:
-        provider = provider_from_config(_config(), client=_exploding_client())
+        provider = _provider(_config(), client=_exploding_client())
         assert provider.completions_url == (
             "https://api.groq.com/openai/v1/chat/completions"
         )
@@ -102,7 +118,7 @@ class TestConstruction:
         assert provider.model == "llama-3.3-70b-versatile"
 
     def test_a_trailing_slash_on_the_base_url_does_not_double_up(self) -> None:
-        provider = provider_from_config(
+        provider = _provider(
             _config(base_url="https://api.groq.com/openai/v1/"),
             client=_exploding_client(),
         )
@@ -159,7 +175,7 @@ def _recording_provider(
         return httpx.Response(status_code, json=body or _completion_body())
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(**overrides), client=client)
+    return _provider(_config(**overrides), client=client)
 
 
 _PROMPT: list[Message] = [{"role": "user", "content": "add two numbers"}]
@@ -273,7 +289,7 @@ class TestCompleteResponse:
 def _failing_provider(handler: Handler) -> OpenAICompatProvider:
     """A provider whose transport runs the given handler."""
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 def _responding_provider(
@@ -290,7 +306,7 @@ def _responding_provider(
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 class TestCompleteErrors:
@@ -373,7 +389,7 @@ class TestCompleteErrors:
 
 def _models_provider(handler: Handler) -> OpenAICompatProvider:
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 def _serving(*model_ids: str) -> Handler:
