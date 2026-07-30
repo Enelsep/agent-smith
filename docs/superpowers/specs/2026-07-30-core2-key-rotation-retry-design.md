@@ -11,8 +11,11 @@ CORE-1 left two seams: `KeySource`, consulted on every request rather than once 
 and `ProviderError`, which carries `status_code`, lowercased response `headers` and `is_timeout`
 so a retry layer can tell a rate limit from a server fault without importing a transport. CORE-2
 fills both. A `KeyPool` implements `KeySource` over every key `discover_api_keys()` found, and a
-`RetryingProvider` decorates `LLMProvider` with the attempt loop. No line of `openai_compat.py`
-changes.
+`RetryingProvider` decorates `LLMProvider` with the attempt loop.
+
+`OpenAICompatProvider` itself is untouched — that is what the `KeySource` seam bought. The one
+edit to `openai_compat.py` is `provider_from_config()`, which is the module's assembly function
+and whose whole job is to know what gets wrapped in what.
 
 ## Scope boundary
 
@@ -128,6 +131,18 @@ It takes a concrete `KeyPool`, not a new protocol. There is no second implementa
 and a real pool with an injected clock is a better test double than a spy would be — it exercises
 the parking arithmetic instead of asserting that a method was called. YAGNI.
 
+`inner` is typed by one Protocol local to `retry.py`:
+
+```python
+class ValidatingProvider(Protocol):
+    def complete(self, messages, stop=None, max_tokens=None) -> LLMResponse: ...
+    def validate_model(self) -> None: ...
+```
+
+`LLMProvider` alone would not do, because `RetryingProvider` has to forward `validate_model()` —
+see Construction. It lives in `retry.py` rather than `protocol.py` because it describes what this
+decorator needs from what it wraps, not a contract the project codes against.
+
 `clock`, `sleep` and `jitter` are all injected, which is what lets the whole test suite run
 without sleeping for real or flaking on a random draw.
 
@@ -149,10 +164,16 @@ for attempt in range(max_attempts):
         wait = _retry_delay(error, attempt)
         if wait is None:
             raise
+    if attempt + 1 == max_attempts:
+        break
     if wait and not _sleep_if_it_fits(wait, started):
         break
 raise last
 ```
+
+The `attempt + 1 == max_attempts` guard is what stops the loop sleeping after its final attempt.
+Without it the last failure still draws a backoff and waits it out before giving up — wall clock
+spent on a wake-up that never comes.
 
 `pool.penalise(error)` runs for **every** `ProviderError`, unconditionally. It is
 `_penalty_seconds` that answers `None` on a 5xx or a timeout and parks nothing. The retrier
@@ -228,8 +249,11 @@ one new method on the model:
 ```python
 def after_retries(self, count: int) -> "LLMResponse":
     """The same completion, recording how many attempts it took to get it."""
-    return LLMResponse(**self.model_dump(), retries=count)
+    return LLMResponse(**self.model_dump(exclude={"retries"}), retries=count)
 ```
+
+`exclude={"retries"}` is load-bearing: `model_dump()` returns the field too, and passing it
+alongside the keyword argument is a duplicate-argument `TypeError`.
 
 Constructing rather than `model_copy(update=...)`, because `model_copy` skips validation. The
 copy is named and belongs to the type that owns the field, instead of leaving a pydantic idiom in
