@@ -11,6 +11,7 @@ class Outcome(str, Enum):
     ERROR = "error"
     SOFT_TIMEOUT = "soft_timeout"
     HARD_TIMEOUT = "hard_timeout"
+    CRASHED = "crashed"
     FINAL_ANSWER = "final_answer"
     SHUTDOWN = "shutdown"
 
@@ -38,11 +39,14 @@ class ExecResult:
         return self.outcome is Outcome.OK
 
 
-class FinalAnswerSignal(Exception):
+class FinalAnswerSignal(BaseException):
     """Raised by the injected final_answer() to unwind out of user code.
 
-    Private to the sandbox: user code has no reference to this class, so it
-    cannot deliberately catch it.
+    Inherits BaseException, not Exception, so a broad ``except Exception`` in
+    user code cannot swallow it. The executed code is LLM-written and routinely
+    wraps its own work in try/except Exception; catching only Exception here
+    would silently lose the final answer. The worker catches this class
+    explicitly, before its own ``except Exception``.
     """
 
     def __init__(self, value: object) -> None:

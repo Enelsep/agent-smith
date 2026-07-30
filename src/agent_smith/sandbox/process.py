@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import time
 from typing import TYPE_CHECKING
 
 from typing_extensions import Self
@@ -78,34 +79,47 @@ class Sandbox:
         """Run one code block. Never raises on user-code failure."""
         if self._proc is None or not self._proc.is_alive():
             self.restart()
-        # `start()` always sets it; the check keeps the type narrow below and
-        # turns a would-be AttributeError into a clear failure.
         conn = self._conn
         if conn is None:
             raise RuntimeError("sandbox has no live connection to its worker")
 
+        started = time.monotonic()
         try:
             conn.send(ExecRequest(code=code))
         except (BrokenPipeError, OSError):
             self.restart()
-            return self._hard_timeout_result("worker was not reachable")
+            return self._failure_result(
+                Outcome.CRASHED,
+                "the sandbox worker could not be reached; it was restarted "
+                "and all previously defined variables were lost",
+                started,
+            )
 
         deadline = self.timeout + HARD_TIMEOUT_MARGIN
         if not conn.poll(deadline):
             self.restart()
-            return self._hard_timeout_result(
-                f"code did not return control after {deadline:.0f}s\
-                  and could not "
-                f"be interrupted; the sandbox was restarted\
-                  and all previously "
-                f"defined variables were lost"
+            return self._failure_result(
+                Outcome.HARD_TIMEOUT,
+                f"code did not return control after {deadline:.0f}s and could "
+                "not be interrupted; the sandbox was restarted and all "
+                "previously defined variables were lost",
+                started,
             )
 
         try:
             return conn.recv()
         except (EOFError, OSError):
             self.restart()
-            return self._hard_timeout_result("worker died mid-execution")
+            return self._failure_result(
+                Outcome.CRASHED,
+                "the sandbox worker died mid-execution; it was restarted and "
+                "all previously defined variables were lost",
+                started,
+            )
 
-    def _hard_timeout_result(self, message: str) -> ExecResult:
-        return ExecResult(outcome=Outcome.HARD_TIMEOUT, error=message)
+    def _failure_result(
+        self, outcome: Outcome, message: str, started: float
+    ) -> ExecResult:
+        """Build a result for a parent-side failure, timing the wait we spent."""
+        duration_ms = (time.monotonic() - started) * 1000
+        return ExecResult(outcome=outcome, error=message, duration_ms=duration_ms)
