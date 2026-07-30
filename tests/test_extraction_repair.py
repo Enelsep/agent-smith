@@ -43,6 +43,22 @@ def test_an_unclosed_object_is_closed() -> None:
     assert decode_json(repaired[0]) == {"a": {"b": 1}}
 
 
+def test_a_truncation_that_stops_on_a_comma_is_repaired() -> None:
+    # What max_tokens leaves behind when it cuts between two arguments. Closing
+    # the object alone yields `{"code": "x",}`, which is still not JSON.
+    repaired = repair_json('{"name": "run", "arguments": {"code": "x",')
+
+    assert repaired is not None
+    assert decode_json(repaired[0]) == {"name": "run", "arguments": {"code": "x"}}
+
+
+def test_a_truncation_that_stops_inside_a_string_after_a_comma_is_repaired() -> None:
+    repaired = repair_json('{"a": 1, "b": "half')
+
+    assert repaired is not None
+    assert decode_json(repaired[0]) == {"a": 1, "b": "half"}
+
+
 def test_valid_json_is_not_repaired() -> None:
     # Nothing changed it, so there is no repair to report.
     assert repair_json('{"a": 1}') is None

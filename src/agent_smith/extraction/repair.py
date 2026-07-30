@@ -91,6 +91,17 @@ def _close_json_structures(text: str) -> str:
     return _close_structures(text, ('"',))
 
 
+def _close_json_structures_after_a_comma(text: str) -> str:
+    """Close the structures, then drop the comma closing them just exposed.
+
+    A generation cut between two members ends on its separator — `{"a": 1,` —
+    and closing that yields `{"a": 1,}`, which no more decodes than the original.
+    The comma only becomes trailing once the brace is there, so the two fixes
+    have to run in this order and in one pass.
+    """
+    return _drop_trailing_commas(_close_json_structures(text))
+
+
 def _close_python_structures(code: str) -> str:
     return _close_structures(code, ('"', "'"))
 
@@ -119,6 +130,12 @@ _JSON_FIXES: tuple[_Fix, ...] = (
     ("stripped a markdown fence wrapped around the JSON", _strip_fence),
     ("dropped a trailing comma", _drop_trailing_commas),
     ("closed an unterminated string or object", _close_json_structures),
+    # Last, so that the two notes above keep the cases they already describe on
+    # their own and this one is only reported when it is the accurate account.
+    (
+        "closed an unterminated string or object and dropped the trailing comma",
+        _close_json_structures_after_a_comma,
+    ),
 )
 
 _PYTHON_FIXES: tuple[_Fix, ...] = (
