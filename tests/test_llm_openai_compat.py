@@ -14,6 +14,7 @@ import pytest
 
 from agent_smith.config import ConfigError, ResolvedConfig
 from agent_smith.llm import LLMProvider, LLMResponse, Message, ProviderError
+from agent_smith.llm.keypool import AllKeysParked
 from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
@@ -472,14 +473,15 @@ class TestAssembly:
 
     def test_the_retrier_and_the_provider_draw_from_one_pool(self) -> None:
         # Two pools would leave the feedback loop open: the retrier would park
-        # keys in a pool nobody draws from, and the rate-limited key would come
-        # straight back round on the next attempt.
+        # keys in a pool nobody draws from. The third attempt is what exposes
+        # it — with one pool there is no key left to hand out, with two the
+        # provider's own pool cheerfully comes back round to the first.
         seen: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             seen.append(request.headers["authorization"])
-            if len(seen) == 1:
-                return httpx.Response(429, headers={"retry-after": "60"})
+            if len(seen) <= 2:
+                return httpx.Response(429)
             return httpx.Response(200, json=_completion_body())
 
         client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -488,7 +490,7 @@ class TestAssembly:
         )
         messages: list[Message] = [{"role": "user", "content": "hi"}]
 
-        result = assembled.complete(messages)
+        with pytest.raises(AllKeysParked):
+            assembled.complete(messages)
 
-        assert result.retries == 1
         assert seen == ["Bearer first", "Bearer second"]
