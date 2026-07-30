@@ -10,9 +10,16 @@ strategy in the failure and to avoid spending a second repair on it.
 
 import ast
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
+from agent_smith.extraction.normalise import (
+    coerce_text_value,
+    decode_json,
+    render_calls,
+)
+from agent_smith.extraction.repair import repair_json
 from agent_smith.extraction.result import Strategy
 
 # The statement kinds that make a parsed tree worth executing. A module holding
@@ -32,6 +39,20 @@ _ACTIONABLE = (
 
 _FENCE_OPEN = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\r?\n")
 _FENCE_CLOSE = re.compile(r"```|<end_code>")
+_INVOKE = re.compile(
+    r"<invoke\s+name=[\"'](?P<name>[^\"']+)[\"']\s*>(?P<body>.*?)</invoke>", re.DOTALL
+)
+_PARAMETER = re.compile(
+    r"<parameter\s+name=[\"'](?P<name>[^\"']+)[\"']\s*>(?P<value>.*?)</parameter>",
+    re.DOTALL,
+)
+_TOOL_CALL = re.compile(r"<tool_call>(?P<payload>.*?)</tool_call>", re.DOTALL)
+_ACTION = re.compile(r"^[ \t]*Action[ \t]*:[ \t]*(?P<name>\S+)[ \t]*$", re.MULTILINE)
+_ACTION_INPUT = re.compile(
+    r"^[ \t]*Action Input[ \t]*:[ \t]*(?P<payload>.+?)"
+    r"(?=\n[ \t]*(?:Action|Thought|Observation)[ \t]*:|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -88,7 +109,96 @@ def bare(text: str) -> Candidate | None:
     return Candidate(code)
 
 
+def _as_call(decoded: Any) -> tuple[str, Mapping[str, Any]]:
+    """Read a decoded tool call, or say why it is not one."""
+    if not isinstance(decoded, dict):
+        raise PayloadError("a tool call must be a JSON object")
+    name = decoded.get("name")
+    if not isinstance(name, str) or not name:
+        raise PayloadError('a tool call needs a string "name"')
+    arguments = decoded.get("arguments", {})
+    if not isinstance(arguments, dict):
+        raise PayloadError('"arguments" must be a JSON object')
+    return name, arguments
+
+
+def _decode_payloads(payloads: Sequence[str]) -> tuple[list[Any], str | None]:
+    """Decode every payload, spending at most one repair across all of them.
+
+    The budget is one repair per extraction. A second malformed payload after a
+    repair has already been spent is a failure, not another attempt.
+    """
+    decoded: list[Any] = []
+    note: str | None = None
+    for payload in payloads:
+        try:
+            decoded.append(decode_json(payload))
+            continue
+        except ValueError:
+            pass
+        if note is not None:
+            raise PayloadError("more than one tool call payload would not decode")
+        repaired = repair_json(payload)
+        if repaired is None:
+            raise PayloadError("the tool call payload would not decode")
+        text, note = repaired
+        try:
+            decoded.append(decode_json(text))
+        except ValueError:
+            raise PayloadError("the tool call payload would not decode") from None
+    return decoded, note
+
+
+def xml(text: str) -> Candidate | None:
+    """Anthropic-style `<invoke>` blocks with `<parameter>` bodies."""
+    invocations = list(_INVOKE.finditer(text))
+    if not invocations:
+        return None
+    calls = [
+        (
+            invocation.group("name"),
+            {
+                parameter.group("name"): coerce_text_value(parameter.group("value"))
+                for parameter in _PARAMETER.finditer(invocation.group("body"))
+            },
+        )
+        for invocation in invocations
+    ]
+    return Candidate(render_calls(calls))
+
+
+def hermes(text: str) -> Candidate | None:
+    """Hermes `<tool_call>` blocks holding a JSON object each."""
+    payloads = [match.group("payload") for match in _TOOL_CALL.finditer(text)]
+    if not payloads:
+        return None
+    decoded, note = _decode_payloads(payloads)
+    return Candidate(render_calls([_as_call(item) for item in decoded]), note)
+
+
+def react(text: str) -> Candidate | None:
+    """ReAct `Action:` / `Action Input:` pairs."""
+    names = [match.group("name") for match in _ACTION.finditer(text)]
+    if not names:
+        return None
+    payloads = [
+        match.group("payload").strip() for match in _ACTION_INPUT.finditer(text)
+    ]
+    if len(payloads) != len(names):
+        raise PayloadError("every Action: line needs its own Action Input: line")
+    decoded, note = _decode_payloads(payloads)
+    calls: list[tuple[str, Mapping[str, Any]]] = []
+    for name, arguments in zip(names, decoded, strict=True):
+        if not isinstance(arguments, dict):
+            raise PayloadError("Action Input: must be a JSON object")
+        calls.append((name, arguments))
+    return Candidate(render_calls(calls), note)
+
+
 STRATEGY_CHAIN: tuple[tuple[Strategy, Callable[[str], Candidate | None]], ...] = (
     (Strategy.FENCED, fenced),
+    (Strategy.XML, xml),
+    (Strategy.HERMES, hermes),
+    (Strategy.REACT, react),
     (Strategy.BARE, bare),
 )
