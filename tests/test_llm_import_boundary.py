@@ -11,6 +11,8 @@ the one worth encoding.
 """
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -89,6 +91,24 @@ def test_the_provider_module_does_import_one() -> None:
     # Guards the test above against passing because the search broke.
     provider = REPO_ROOT / ALLOWED_HTTP_MODULE
     assert _http_clients_in(provider) == {"httpx"}
+
+
+def test_importing_the_contract_does_not_load_an_http_client() -> None:
+    # The AST scan above proves no module outside the provider names an HTTP
+    # client; it says nothing about what a package import pulls in behind it.
+    # `agent_smith.llm` re-exports the contract and stops there, so CORE-2 and
+    # CORE-4 can import `LLMProvider` without loading `httpx`. Re-exporting the
+    # provider from `__init__.py` would undo that silently, hence this test.
+    # A subprocess is the only honest probe: by the time pytest collects this
+    # file, `httpx` is long since in our own `sys.modules`.
+    probe = "import sys, agent_smith.llm; print('httpx' in sys.modules)"
+    loaded = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert loaded == "False"
 
 
 def test_parsing_a_url_is_not_making_a_request() -> None:

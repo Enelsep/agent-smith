@@ -40,8 +40,8 @@ the first attempt succeeded.
 
 ```
 src/agent_smith/llm/
-├── __init__.py        # re-exports: LLMProvider, KeySource, Message, LLMResponse,
-│                      #             ProviderError, OpenAICompatProvider
+├── __init__.py        # re-exports the contract: LLMProvider, KeySource, Message,
+│                      #                          LLMResponse, ProviderError
 ├── errors.py          # ProviderError
 ├── response.py        # LLMResponse (frozen)
 ├── protocol.py        # LLMProvider, KeySource, Message
@@ -49,8 +49,11 @@ src/agent_smith/llm/
 ```
 
 The split mirrors `config/`, and it earns its keep: `errors.py`, `response.py` and `protocol.py`
-do not import the HTTP client. CORE-2 and CORE-4 depend on the contract without dragging in the
-transport, and "nothing above the provider talks HTTP" becomes a test rather than an intention.
+do not import the HTTP client, and neither does `__init__.py` — it re-exports the contract and
+stops there. So `import agent_smith.llm` loads no transport, and CORE-2 and CORE-4 depend on the
+contract without dragging one in. Reaching the provider means naming `openai_compat` at the
+import site, which is precisely where an HTTP surface should be visible. "Nothing above the
+provider talks HTTP" becomes a test rather than an intention.
 
 A layer separating HTTP transport from the OpenAI wire format was considered and rejected. It
 would pay off only if a second wire format were coming; everything in scope is OpenAI-compatible
