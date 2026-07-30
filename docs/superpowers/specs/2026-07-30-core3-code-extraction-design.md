@@ -83,8 +83,19 @@ exactly the kind of number BENCH-3 wants and would be tedious to reconstruct lat
 
 ## The chain
 
-A module-level tuple, walked in order. Each strategy is a `Callable[[str], str | None]` returning
-the candidate code or `None`.
+A module-level tuple, walked in order. Each strategy is a
+`Callable[[str], Candidate | None]`, where `Candidate` holds the code and an optional
+`repair_note` for a repair the strategy performed while matching. A strategy has three outcomes,
+not two, which is why it does not simply return a string:
+
+- `None` — the marker was absent.
+- a `Candidate` — the marker was there and produced code.
+- `PayloadError` — the marker was there but its payload would not decode, its own repair attempt
+  included. Raising rather than returning keeps the common path a plain value; the exception never
+  leaves the module, because `extract_code` catches it.
+
+The third outcome is what makes `strategy` nameable on a failure, and what gives payload-level
+repair something to work on.
 
 1. **`FENCED`** — a block opened by ` ``` ` with an optional `python` / `py` tag, closed by ` ``` `
    or by `<end_code>`. The first block wins: the CORE-6 prompt asks for one code block per turn,
@@ -92,9 +103,13 @@ the candidate code or `None`.
 2. **`XML`** — `<invoke name="x"><parameter name="y">…</parameter></invoke>`.
 3. **`HERMES`** — `<tool_call>{"name": …, "arguments": {…}}</tool_call>`, possibly several.
 4. **`REACT`** — an `Action:` line naming the tool and an `Action Input:` line holding a JSON object.
-5. **`BARE`** — last resort. The whole text must parse *and* the tree must hold at least one
-   actionable node: `Call`, `Assign`, `AugAssign`, `Import`, `ImportFrom`, `FunctionDef`,
-   `ClassDef`, `Return`.
+5. **`BARE`** — last resort. The text must parse *and* the tree must hold at least one actionable
+   node: `Call`, `Assign`, `AugAssign`, `AnnAssign`, `Import`, `ImportFrom`, `FunctionDef`,
+   `AsyncFunctionDef`, `ClassDef`, `Return`. If the whole text does not parse, this strategy spends
+   the repair itself before giving up: with no marker to delimit the code, "where does the Python
+   start" is its own question, so `Here you go:` followed by a working line is a hit rather than a
+   miss. The actionable-node test then still applies to the repaired text, which is what stops the
+   repair from manufacturing code out of a prose reply by dropping lines until something parses.
 
 Strategies 2 to 4 build their candidate through `normalise.py`. Strategies 1 and 5 hand back Python
 the model already wrote.
@@ -167,10 +182,17 @@ quoted `"12"` from silently shedding its quotes.
 ## Repair
 
 The card asks for one repair attempt on `SyntaxError`, reported back to the model. Read "one" as
-"we do not loop with the LLM", not as "we try a single substitution": `repair(candidate)` returns
-`(repaired_code, note)` or `None`, trying a short ordered list of fixes and keeping the first that
-makes `ast.parse` succeed. From the caller's side that is still one attempt, one `repaired=True`,
-one note.
+"we do not loop with the LLM", not as "we try a single substitution": `repair_json(payload)` and
+`repair_python(code)` each return `(repaired_text, note)` or `None`, walking a short ordered list of
+fixes and keeping the first that makes the text valid. Two entry points rather than one because the
+validity test differs — decoding for a payload, parsing for code — over a shared engine. From the
+caller's side that is still one attempt, one `repaired=True`, one note.
+
+Two of the fixes are worth naming, because the obvious version of each is wrong. Dropping prose
+lines must reject a blank result: a candidate stripped down to nothing parses cleanly, so without
+the guard the repair would turn a bad reply into an empty one. And closing an unterminated string
+must close the open brackets in the same pass — a truncated `print("hello` needs its quote *and*
+its parenthesis, and fixing either alone still will not parse.
 
 The three malformations the card names do not live at the same level, and neither does the failure
 they cause:
