@@ -124,7 +124,7 @@ parsed. `BARE` is for "no marker at all", not for "a marker that went wrong".
 
 One numbered pair of lines per call, in order of appearance:
 
-```python
+```text
 result_1 = read_file(filepath='/tmp/a.py', start_line=12, end_line=None)
 print(result_1)
 ```
