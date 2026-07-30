@@ -133,14 +133,14 @@ def test_all_keys_parked_reports_the_earliest_deadline() -> None:
 
 
 def test_all_keys_parked_never_names_a_key() -> None:
-    pool = KeyPool(["gsk_secret"], clock=FakeClock())
+    pool = KeyPool(["not-a-real-key"], clock=FakeClock())
     pool.api_key()
     pool.penalise(ProviderError("unauthorized", status_code=401))
 
     with pytest.raises(AllKeysParked) as parked:
         pool.api_key()
 
-    assert "gsk_secret" not in str(parked.value)
+    assert "not-a-real-key" not in str(parked.value)
 
 
 def test_penalising_before_any_key_was_lent_does_nothing() -> None:
