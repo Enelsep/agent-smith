@@ -14,6 +14,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
 from agent_smith.extraction.normalise import (
     coerce_text_value,
     decode_json,
@@ -127,17 +129,42 @@ def bare(text: str, _step: int) -> Candidate | None:
     return Candidate(code, note)
 
 
-def _as_call(decoded: Any) -> tuple[str, Mapping[str, Any]]:
-    """Read a decoded tool call, or say why it is not one."""
-    if not isinstance(decoded, dict):
-        raise PayloadError("a tool call must be a JSON object")
-    name = decoded.get("name")
-    if not isinstance(name, str) or not name:
-        raise PayloadError('a tool call needs a string "name"')
-    arguments = decoded.get("arguments", {})
-    if not isinstance(arguments, dict):
-        raise PayloadError('"arguments" must be a JSON object')
-    return name, arguments
+class _ToolCall(BaseModel):
+    """The envelope a tool call arrives in.
+
+    Hermes sends the name and the arguments in one object; ReAct splits them
+    across two lines and rebuilds this shape before validating.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+# Pydantic reports for a developer; these go to the model. Keyed by the field
+# the first error names, with the empty key standing for "not an object at all".
+_PROBLEMS = {
+    "name": 'a tool call needs a non-empty string "name"',
+    "arguments": "the call arguments must be a JSON object",
+}
+
+
+def _as_call(decoded: object) -> tuple[str, Mapping[str, Any]]:
+    """Read a decoded tool call, or say why it is not one.
+
+    `object` rather than `Any` so mypy demands the narrowing that validation
+    performs, instead of trusting the value came out of `json.loads` typed.
+    """
+    try:
+        call = _ToolCall.model_validate(decoded)
+    except ValidationError as invalid:
+        location = invalid.errors()[0]["loc"]
+        field = str(location[0]) if location else ""
+        raise PayloadError(
+            _PROBLEMS.get(field, "a tool call must be a JSON object")
+        ) from None
+    return call.name, call.arguments
 
 
 def _decode_payloads(payloads: Sequence[str]) -> tuple[list[Any], str | None]:
@@ -205,11 +232,10 @@ def react(text: str, step: int) -> Candidate | None:
     if len(payloads) != len(names):
         raise PayloadError("every Action: line needs its own Action Input: line")
     decoded, note = _decode_payloads(payloads)
-    calls: list[tuple[str, Mapping[str, Any]]] = []
-    for name, arguments in zip(names, decoded, strict=True):
-        if not isinstance(arguments, dict):
-            raise PayloadError("Action Input: must be a JSON object")
-        calls.append((name, arguments))
+    calls = [
+        _as_call({"name": name, "arguments": arguments})
+        for name, arguments in zip(names, decoded, strict=True)
+    ]
     return Candidate(render_calls(calls, step), note)
 
 

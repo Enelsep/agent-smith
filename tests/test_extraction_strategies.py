@@ -197,6 +197,39 @@ def test_a_tool_call_without_a_name_raises_payload_error() -> None:
         hermes('<tool_call>{"arguments": {}}</tool_call>', 1)
 
 
+def test_a_numeric_tool_name_raises_payload_error() -> None:
+    with pytest.raises(PayloadError):
+        hermes('<tool_call>{"name": 123}</tool_call>', 1)
+
+
+def test_an_empty_tool_name_raises_payload_error() -> None:
+    with pytest.raises(PayloadError):
+        hermes('<tool_call>{"name": ""}</tool_call>', 1)
+
+
+def test_non_object_arguments_raise_payload_error() -> None:
+    with pytest.raises(PayloadError):
+        hermes('<tool_call>{"name": "f", "arguments": [1, 2]}</tool_call>', 1)
+
+
+def test_a_tool_call_that_is_not_an_object_raises_payload_error() -> None:
+    with pytest.raises(PayloadError):
+        hermes("<tool_call>[1, 2]</tool_call>", 1)
+
+
+def test_extra_keys_in_a_tool_call_are_ignored() -> None:
+    candidate = hermes('<tool_call>{"name": "get_patch", "id": "abc"}</tool_call>', 1)
+
+    assert candidate is not None
+    assert candidate.code == "result_1_1 = get_patch()\nprint(result_1_1)"
+
+
+def test_react_rejects_a_non_object_action_input() -> None:
+    # Same definition of a call as Hermes, reached through the shared model.
+    with pytest.raises(PayloadError):
+        react("Action: read_file\nAction Input: [1, 2]", 1)
+
+
 def test_nan_in_a_tool_call_raises_payload_error() -> None:
     # repr(float("nan")) is `nan`, a bare name. Better a decode failure here
     # than a NameError in the sandbox.
