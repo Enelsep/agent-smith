@@ -58,14 +58,17 @@ def test_nan_in_an_xml_value_stays_text() -> None:
 
 
 def test_one_call_renders_as_an_assign_and_a_print() -> None:
-    rendered = render_calls([("read_file", {"filepath": "/tmp/a.py"})])
+    rendered = render_calls([("read_file", {"filepath": "/tmp/a.py"})], 1)
 
-    assert rendered == "result_1 = read_file(filepath='/tmp/a.py')\nprint(result_1)"
+    assert rendered == (
+        "result_1_1 = read_file(filepath='/tmp/a.py')\nprint(result_1_1)"
+    )
 
 
 def test_values_are_rendered_as_python_literals() -> None:
     rendered = render_calls(
-        [("read_file", {"filepath": "/tmp/a.py", "start_line": 12, "end_line": None})]
+        [("read_file", {"filepath": "/tmp/a.py", "start_line": 12, "end_line": None})],
+        1,
     )
 
     assert "start_line=12" in rendered
@@ -78,7 +81,7 @@ def test_values_are_rendered_as_python_literals() -> None:
     ["O'Brien", 'He said "hi"', "back\\slash", "line\nbreak", [1, {"a": None}], True],
 )
 def test_every_rendered_value_parses_back_to_itself(value: object) -> None:
-    rendered = render_calls([("f", {"x": value})])
+    rendered = render_calls([("f", {"x": value})], 1)
     statement = ast.parse(rendered).body[0]
 
     assert isinstance(statement, ast.Assign)
@@ -88,12 +91,24 @@ def test_every_rendered_value_parses_back_to_itself(value: object) -> None:
 
 
 def test_several_calls_are_numbered_in_order() -> None:
-    rendered = render_calls([("first", {}), ("second", {})])
+    rendered = render_calls([("first", {}), ("second", {})], 1)
 
     assert rendered == (
-        "result_1 = first()\nprint(result_1)\nresult_2 = second()\nprint(result_2)"
+        "result_1_1 = first()\nprint(result_1_1)\n"
+        "result_1_2 = second()\nprint(result_1_2)"
     )
 
 
 def test_no_calls_render_to_nothing() -> None:
-    assert render_calls([]) == ""
+    assert render_calls([], 1) == ""
+
+
+def test_the_step_is_part_of_the_variable_name() -> None:
+    # The worker builds the namespace once and reuses it, so a name restarting
+    # at result_1 every step would overwrite the previous step's value in place.
+    first = render_calls([("f", {})], 1)
+    third = render_calls([("f", {})], 3)
+
+    assert "result_1_1" in first
+    assert "result_3_1" in third
+    assert first != third

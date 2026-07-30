@@ -84,7 +84,8 @@ exactly the kind of number BENCH-3 wants and would be tedious to reconstruct lat
 ## The chain
 
 A module-level tuple, walked in order. Each strategy is a
-`Callable[[str], Candidate | None]`, where `Candidate` holds the code and an optional
+`Callable[[str, int], Candidate | None]` — the reply and the step number — where `Candidate` holds
+the code and an optional
 `repair_note` for a repair the strategy performed while matching. A strategy has three outcomes,
 not two, which is why it does not simply return a string:
 
@@ -137,24 +138,37 @@ parsed. `BARE` is for "no marker at all", not for "a marker that went wrong".
 
 ## Normalisation
 
-One numbered pair of lines per call, in order of appearance:
+One assign-then-print pair per call, in order of appearance, at step 3:
 
 ```text
-result_1 = read_file(filepath='/tmp/a.py', start_line=12, end_line=None)
-print(result_1)
+result_3_1 = read_file(filepath='/tmp/a.py', start_line=12, end_line=None)
+print(result_3_1)
 ```
 
 Two lines rather than one, because the two obvious single-line forms each lose something. A bare
-`result_1 = read_file(...)` prints nothing, and the SBX-1 worker reports `stdout` and `stderr` — so
-the model would fire a tool call and observe silence, learning nothing from its own action. A bare
-`print(read_file(...))` shows the value but discards it, when a namespace that persists across
-steps is the whole reason the sandbox works the way it does. Assign, then print: the model can
-refer to `result_1` three steps later, and `StepMetrics.sandbox_input` — which is archived in the
-submitted JSON and read by a human marker — shows a named value and its display rather than a
-throwaway.
+`result_3_1 = read_file(...)` prints nothing, and the SBX-1 worker reports `stdout` and `stderr` —
+so the model would fire a tool call and observe silence, learning nothing from its own action. A
+bare `print(read_file(...))` shows the value but discards it, when a namespace that persists across
+steps is the whole reason the sandbox works the way it does. Assign, then print: the value survives
+into later steps, and `StepMetrics.sandbox_input` — archived in the submitted JSON and read by a
+human marker — shows a named value and its display rather than a throwaway.
 
-Several calls in one message get several pairs, `result_1`, `result_2`, and so on. Keeping only the
-first would be precisely the silent truncation the subject calls out as a failure mode.
+Several calls in one message get several pairs, `result_3_1`, `result_3_2`, and so on. Keeping only
+the first would be precisely the silent truncation the subject calls out as a failure mode.
+
+### Why the step is in the name
+
+`extract_code(text, *, step)` takes the 1-indexed iteration number, and the name it produces is
+`result_{step}_{index}`.
+
+That is not decoration. `worker_main` builds the namespace once and hands the same dict to every
+execution — persistence across steps is the point of SBX-1. A name restarting at `result_1` each
+step would therefore overwrite the previous step's value in place, leaving a stale binding under a
+live name with nothing to signal the substitution. The failure mode is silent and only bites the
+model that trusts the transcript, which is the worst combination.
+
+`step` is required rather than defaulted for the same reason. A default would make forgetting it
+the easy path, and forgetting it restores exactly the bug.
 
 ### Rendering values
 
@@ -232,6 +246,8 @@ than saying "extraction failed". CORE-4 decides how to wrap it into an observati
 - **Value rendering** — a table over `None`, `int`, `bool`, an apostrophe, a double quote, and a
   nested list; plus the XML `json.loads` step, including the `"12"` case that must stay a string.
 - **Ordering** — a text carrying two markers goes to the higher strategy.
+- **The step is in the name** — the same call rendered at step 1 and at step 3 produces different
+  variables, so two steps cannot collide in the persistent namespace.
 - **The `BARE` guard** — `Yes` fails instead of producing code.
 - **`NaN` is not a value** — `{"x": NaN}` inside a `<tool_call>` fails to decode rather than
   rendering a bare `nan` into the call string.

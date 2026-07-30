@@ -41,13 +41,19 @@ def coerce_text_value(raw: str) -> Any:
     return raw if isinstance(value, str) else value
 
 
-def render_calls(calls: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
-    """One numbered assign-then-print pair per call, in order of appearance.
+def render_calls(calls: Sequence[tuple[str, Mapping[str, Any]]], step: int) -> str:
+    """One assign-then-print pair per call, in order of appearance.
 
     Assign *and* print, because each half alone loses something. A bare
     assignment prints nothing, and the worker reports stdout — the model would
     fire a tool call and observe silence. A bare print discards the value, when a
     namespace that persists across steps is the whole point of the sandbox.
+
+    Which is exactly why the variable is named for its step. The worker builds
+    the namespace once and reuses it for every execution, so a name restarting at
+    `result_1` each step would overwrite the previous step's value in place —
+    leaving a stale binding under a live name, with nothing to signal it.
+    `result_3_1` cannot collide with an earlier step.
 
     Values go through `repr()`, which yields a correct Python literal for every
     type JSON can produce and picks its own quoting. String interpolation would
@@ -56,7 +62,8 @@ def render_calls(calls: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
     """
     lines: list[str] = []
     for index, (name, arguments) in enumerate(calls, start=1):
+        variable = f"result_{step}_{index}"
         rendered = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
-        lines.append(f"result_{index} = {name}({rendered})")
-        lines.append(f"print(result_{index})")
+        lines.append(f"{variable} = {name}({rendered})")
+        lines.append(f"print({variable})")
     return "\n".join(lines)

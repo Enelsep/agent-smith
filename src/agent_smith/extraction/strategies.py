@@ -71,7 +71,7 @@ class PayloadError(Exception):
         self.reason = reason
 
 
-def fenced(text: str) -> Candidate | None:
+def fenced(text: str, _step: int) -> Candidate | None:
     """A ``` block, optionally tagged, closed by ``` or by `<end_code>`.
 
     The first block wins: the CORE-6 prompt asks for one code block per turn, so
@@ -97,7 +97,7 @@ def _parsed(code: str) -> ast.Module | None:
         return None
 
 
-def bare(text: str) -> Candidate | None:
+def bare(text: str, _step: int) -> Candidate | None:
     """Last resort: the whole message, if it is executable Python.
 
     "The model forgot the fence" is one of the commonest malformations and every
@@ -167,7 +167,7 @@ def _decode_payloads(payloads: Sequence[str]) -> tuple[list[Any], str | None]:
     return decoded, note
 
 
-def xml(text: str) -> Candidate | None:
+def xml(text: str, step: int) -> Candidate | None:
     """Anthropic-style `<invoke>` blocks with `<parameter>` bodies."""
     invocations = list(_INVOKE.finditer(text))
     if not invocations:
@@ -182,19 +182,19 @@ def xml(text: str) -> Candidate | None:
         )
         for invocation in invocations
     ]
-    return Candidate(render_calls(calls))
+    return Candidate(render_calls(calls, step))
 
 
-def hermes(text: str) -> Candidate | None:
+def hermes(text: str, step: int) -> Candidate | None:
     """Hermes `<tool_call>` blocks holding a JSON object each."""
     payloads = [match.group("payload") for match in _TOOL_CALL.finditer(text)]
     if not payloads:
         return None
     decoded, note = _decode_payloads(payloads)
-    return Candidate(render_calls([_as_call(item) for item in decoded]), note)
+    return Candidate(render_calls([_as_call(item) for item in decoded], step), note)
 
 
-def react(text: str) -> Candidate | None:
+def react(text: str, step: int) -> Candidate | None:
     """ReAct `Action:` / `Action Input:` pairs."""
     names = [match.group("name") for match in _ACTION.finditer(text)]
     if not names:
@@ -210,10 +210,10 @@ def react(text: str) -> Candidate | None:
         if not isinstance(arguments, dict):
             raise PayloadError("Action Input: must be a JSON object")
         calls.append((name, arguments))
-    return Candidate(render_calls(calls), note)
+    return Candidate(render_calls(calls, step), note)
 
 
-STRATEGY_CHAIN: tuple[tuple[Strategy, Callable[[str], Candidate | None]], ...] = (
+STRATEGY_CHAIN: tuple[tuple[Strategy, Callable[[str, int], Candidate | None]], ...] = (
     (Strategy.FENCED, fenced),
     (Strategy.XML, xml),
     (Strategy.HERMES, hermes),

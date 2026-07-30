@@ -69,7 +69,7 @@ CASES: list[tuple[str, str, Strategy, str]] = [
             "</invoke>"
         ),
         Strategy.XML,
-        "result_1 = read_file(filepath='/testbed/setup.py')\nprint(result_1)",
+        "result_1_1 = read_file(filepath='/testbed/setup.py')\nprint(result_1_1)",
     ),
     (
         "xml invoke with a numeric parameter",
@@ -78,21 +78,21 @@ CASES: list[tuple[str, str, Strategy, str]] = [
             '<parameter name="start_line">10</parameter></invoke>'
         ),
         Strategy.XML,
-        "result_1 = read_file(filepath='a.py', start_line=10)\nprint(result_1)",
+        "result_1_1 = read_file(filepath='a.py', start_line=10)\nprint(result_1_1)",
     ),
     (
         "xml invoke with no parameters",
         'I will submit now.\n<invoke name="get_patch"></invoke>',
         Strategy.XML,
-        "result_1 = get_patch()\nprint(result_1)",
+        "result_1_1 = get_patch()\nprint(result_1_1)",
     ),
     (
         "two xml invokes",
         '<invoke name="list_files"></invoke><invoke name="get_patch"></invoke>',
         Strategy.XML,
         (
-            "result_1 = list_files()\nprint(result_1)\n"
-            "result_2 = get_patch()\nprint(result_2)"
+            "result_1_1 = list_files()\nprint(result_1_1)\n"
+            "result_1_2 = get_patch()\nprint(result_1_2)"
         ),
     ),
     (
@@ -103,7 +103,7 @@ CASES: list[tuple[str, str, Strategy, str]] = [
             "</tool_call>"
         ),
         Strategy.HERMES,
-        "result_1 = search_code(pattern='def solve')\nprint(result_1)",
+        "result_1_1 = search_code(pattern='def solve')\nprint(result_1_1)",
     ),
     (
         "hermes with a null argument",
@@ -112,19 +112,19 @@ CASES: list[tuple[str, str, Strategy, str]] = [
             '"arguments": {"filepath": "a.py", "end_line": null}}</tool_call>'
         ),
         Strategy.HERMES,
-        "result_1 = read_file(filepath='a.py', end_line=None)\nprint(result_1)",
+        "result_1_1 = read_file(filepath='a.py', end_line=None)\nprint(result_1_1)",
     ),
     (
         "hermes with an apostrophe in a value",
         '<tool_call>{"name": "note", "arguments": {"text": "O\'Brien"}}</tool_call>',
         Strategy.HERMES,
-        'result_1 = note(text="O\'Brien")\nprint(result_1)',
+        'result_1_1 = note(text="O\'Brien")\nprint(result_1_1)',
     ),
     (
         "hermes with a trailing comma, repaired",
         '<tool_call>{"name": "get_patch",}</tool_call>',
         Strategy.HERMES,
-        "result_1 = get_patch()\nprint(result_1)",
+        "result_1_1 = get_patch()\nprint(result_1_1)",
     ),
     (
         "two hermes calls in one reply",
@@ -134,8 +134,8 @@ CASES: list[tuple[str, str, Strategy, str]] = [
         ),
         Strategy.HERMES,
         (
-            "result_1 = run_tests()\nprint(result_1)\n"
-            "result_2 = get_patch()\nprint(result_2)"
+            "result_1_1 = run_tests()\nprint(result_1_1)\n"
+            "result_1_2 = get_patch()\nprint(result_1_2)"
         ),
     ),
     (
@@ -146,13 +146,13 @@ CASES: list[tuple[str, str, Strategy, str]] = [
             'Action Input: {"filepath": "a.py"}'
         ),
         Strategy.REACT,
-        "result_1 = read_file(filepath='a.py')\nprint(result_1)",
+        "result_1_1 = read_file(filepath='a.py')\nprint(result_1_1)",
     ),
     (
         "react with empty input",
         "Action: get_patch\nAction Input: {}",
         Strategy.REACT,
-        "result_1 = get_patch()\nprint(result_1)",
+        "result_1_1 = get_patch()\nprint(result_1_1)",
     ),
     (
         "bare python, no fence at all",
@@ -175,7 +175,7 @@ CASES: list[tuple[str, str, Strategy, str]] = [
     ids=[name for name, _, _, _ in CASES],
 )
 def test_the_corpus_extracts(text: str, strategy: Strategy, expected: str) -> None:
-    result = extract_code(text)
+    result = extract_code(text, step=1)
 
     assert result.failure is None
     assert result.strategy is strategy
@@ -188,7 +188,7 @@ def test_the_corpus_extracts(text: str, strategy: Strategy, expected: str) -> No
     ids=[name for name, _, _, _ in CASES],
 )
 def test_every_corpus_extraction_is_valid_python(text: str) -> None:
-    code = extract_code(text).code
+    code = extract_code(text, step=1).code
 
     assert code is not None
     ast.parse(code)

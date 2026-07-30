@@ -12,7 +12,7 @@ _NOTHING_MATCHED = (
 )
 
 
-def extract_code(text: str) -> ExtractionResult:
+def extract_code(text: str, *, step: int) -> ExtractionResult:
     """Extract runnable Python from a model reply. Never raises.
 
     The first strategy whose marker matches owns the outcome; the chain is not
@@ -20,20 +20,26 @@ def extract_code(text: str) -> ExtractionResult:
     carrying two is rare, and falling through would turn one clear failure into
     a pile of diagnostics none of which is the real one.
 
+    `step` is the 1-indexed iteration number, and it is required rather than
+    defaulted. It names the variables a normalised tool call assigns to, and the
+    sandbox namespace outlives the step — so a caller that forgot to pass it
+    would silently overwrite the previous step's values. A default would make
+    that the easy path.
+
     `Exception` is caught at the boundary because CORE-4 carries a hard "must
     never raise" obligation — a crash scores as an automatic fail. `BaseException`
     is not caught: `KeyboardInterrupt` and `SystemExit` must keep propagating.
     """
     try:
-        return _walk(text)
+        return _walk(text, step)
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return ExtractionResult(failure=f"Could not read your reply: {unexpected}")
 
 
-def _walk(text: str) -> ExtractionResult:
+def _walk(text: str, step: int) -> ExtractionResult:
     for strategy, produce in STRATEGY_CHAIN:
         try:
-            candidate = produce(text)
+            candidate = produce(text, step)
         except PayloadError as broken:
             return ExtractionResult(
                 strategy=strategy,
