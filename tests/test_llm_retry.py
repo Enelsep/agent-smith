@@ -57,11 +57,24 @@ class FakeProvider:
 
     Drawing the key matters: it is what makes the pool raise `AllKeysParked`
     from inside `complete()`, which is where the retrier has to meet it.
+
+    `cost` advances the clock before the script is consulted, standing in for
+    the wall clock a real HTTP call spends whether it succeeds or fails.
+    Defaults to `0.0`, so every test that does not pass it is unaffected.
     """
 
-    def __init__(self, script: Sequence[object], pool: KeyPool) -> None:
+    def __init__(
+        self,
+        script: Sequence[object],
+        pool: KeyPool,
+        clock: FakeClock,
+        *,
+        cost: float = 0.0,
+    ) -> None:
         self._script = list(script)
         self._pool = pool
+        self._clock = clock
+        self._cost = cost
         self.used_keys: list[str] = []
         self.validated = False
 
@@ -72,6 +85,7 @@ class FakeProvider:
         max_tokens: int | None = None,
     ) -> LLMResponse:
         self.used_keys.append(self._pool.api_key())
+        self._clock.advance(self._cost)
         outcome = self._script.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -91,11 +105,12 @@ def build(
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     max_elapsed_seconds: float = DEFAULT_MAX_ELAPSED_SECONDS,
+    call_cost: float = 0.0,
 ) -> tuple[RetryingProvider, FakeProvider, FakeClock, FakeSleep]:
     clock = FakeClock()
     sleep = FakeSleep(clock)
     pool = KeyPool(list(keys), clock=clock)
-    inner = FakeProvider(script, pool)
+    inner = FakeProvider(script, pool, clock, cost=call_cost)
     retrier = RetryingProvider(
         inner,
         pool,
@@ -342,3 +357,26 @@ def test_it_refuses_a_sleep_that_would_land_exactly_on_the_budget() -> None:
 
     assert sleep.calls == []
     assert len(inner.used_keys) == 1
+
+
+def test_a_slow_endpoint_exhausts_the_budget_without_ever_sleeping() -> None:
+    # A 429 never sleeps: `_retry_delay` gives it `0.0` because the next
+    # attempt goes out on a different key. That means `_sleep_if_it_fits` is
+    # never even called here, so it cannot be what stops a third attempt from
+    # going out over budget — only the check at the top of the loop can. Wall
+    # clock is spent by the call itself (`call_cost`), not by backing off.
+    retrier, inner, _, sleep = build(
+        [
+            ProviderError("slow down", status_code=429),
+            ProviderError("slow down", status_code=429),
+            a_response(),
+        ],
+        max_elapsed_seconds=20.0,
+        call_cost=12.0,
+    )
+
+    with pytest.raises(ProviderError, match="slow down"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == []
+    assert len(inner.used_keys) == 2
