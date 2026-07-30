@@ -471,6 +471,30 @@ class TestAssembly:
 
         provider_from_config(config, client=client).validate_model()
 
+    def test_an_assembled_provider_retries_a_rate_limit_and_answers(self) -> None:
+        # One key rate-limited, the next one serves. This is the whole card in
+        # one call: the pool parks the first key, the retrier moves on, and the
+        # caller gets a completion that says it took two attempts.
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.headers["authorization"])
+            if len(seen) == 1:
+                return httpx.Response(429)
+            return httpx.Response(200, json=_completion_body())
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        assembled = provider_from_config(
+            _config(api_keys=["first", "second"]), client=client
+        )
+        messages: list[Message] = [{"role": "user", "content": "hi"}]
+
+        result = assembled.complete(messages)
+
+        assert result.retries == 1
+        assert result.text == "print(1)"
+        assert seen == ["Bearer first", "Bearer second"]
+
     def test_the_retrier_and_the_provider_draw_from_one_pool(self) -> None:
         # Two pools would leave the feedback loop open: the retrier would park
         # keys in a pool nobody draws from. The third attempt is what exposes
