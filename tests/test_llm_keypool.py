@@ -5,6 +5,7 @@ import math
 import pytest
 
 from agent_smith.config import ConfigError
+from agent_smith.llm import KeySource
 from agent_smith.llm.errors import ProviderError
 from agent_smith.llm.keypool import DEFAULT_COOLDOWN_SECONDS, AllKeysParked, KeyPool
 
@@ -146,5 +147,13 @@ def test_penalising_before_any_key_was_lent_does_nothing() -> None:
     pool = KeyPool(["only"], clock=FakeClock())
 
     pool.penalise(rate_limited("30"))
+
+    assert pool.api_key() == "only"
+
+
+def test_a_pool_is_a_key_source() -> None:
+    # The seam CORE-1 left. Asserted rather than assumed, because the provider
+    # is typed against the protocol and nothing else would catch a drift.
+    pool: KeySource = KeyPool(["only"], clock=FakeClock())
 
     assert pool.api_key() == "only"

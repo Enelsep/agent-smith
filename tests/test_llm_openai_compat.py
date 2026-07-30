@@ -18,7 +18,9 @@ from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
     StaticKeySource,
+    provider_from_config,
 )
+from agent_smith.llm.retry import RetryingProvider
 from agent_smith.models.contract import SandboxConfig
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -452,3 +454,41 @@ class TestValidateModel:
         # An endpoint that answers but serves nothing has told us nothing.
         _models_provider(_serving()).validate_model()
         assert "warning" in capsys.readouterr().err
+
+
+class TestAssembly:
+    def test_the_factory_returns_the_retrying_provider(self) -> None:
+        assembled = provider_from_config(_config(), client=_exploding_client())
+
+        assert isinstance(assembled, RetryingProvider)
+
+    def test_the_assembled_provider_still_validates_its_model(self) -> None:
+        config = _config()
+        client = httpx.Client(
+            transport=httpx.MockTransport(_serving(config.model_name))
+        )
+
+        provider_from_config(config, client=client).validate_model()
+
+    def test_the_retrier_and_the_provider_draw_from_one_pool(self) -> None:
+        # Two pools would leave the feedback loop open: the retrier would park
+        # keys in a pool nobody draws from, and the rate-limited key would come
+        # straight back round on the next attempt.
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.headers["authorization"])
+            if len(seen) == 1:
+                return httpx.Response(429, headers={"retry-after": "60"})
+            return httpx.Response(200, json=_completion_body())
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        assembled = provider_from_config(
+            _config(api_keys=["first", "second"]), client=client
+        )
+        messages: list[Message] = [{"role": "user", "content": "hi"}]
+
+        result = assembled.complete(messages)
+
+        assert result.retries == 1
+        assert seen == ["Bearer first", "Bearer second"]
