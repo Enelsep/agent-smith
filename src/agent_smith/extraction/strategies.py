@@ -19,7 +19,7 @@ from agent_smith.extraction.normalise import (
     decode_json,
     render_calls,
 )
-from agent_smith.extraction.repair import repair_json
+from agent_smith.extraction.repair import repair_json, repair_python
 from agent_smith.extraction.result import Strategy
 
 # The statement kinds that make a parsed tree worth executing. A module holding
@@ -90,23 +90,41 @@ def fenced(text: str) -> Candidate | None:
     return Candidate(rest[: closing.start()].strip())
 
 
+def _parsed(code: str) -> ast.Module | None:
+    try:
+        return ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+
+
 def bare(text: str) -> Candidate | None:
     """Last resort: the whole message, if it is executable Python.
 
     "The model forgot the fence" is one of the commonest malformations and every
     marker-based strategy misses it. The actionable-node test is what keeps this
     honest — prose almost never parses, but a one-word reply does.
+
+    A preamble is repaired here rather than by the caller. There is no marker to
+    delimit the code, so "where does the Python start" is this strategy's own
+    question — a reply of "Sure, here you go:" followed by a working line is a
+    hit, not a miss, and refusing it would cost an iteration to ask again.
     """
     code = text.strip()
     if not code:
         return None
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError):
-        return None
+    note: str | None = None
+    tree = _parsed(code)
+    if tree is None:
+        repaired = repair_python(code)
+        if repaired is None:
+            return None
+        code, note = repaired
+        tree = _parsed(code)
+        if tree is None:
+            return None
     if not any(isinstance(node, _ACTIONABLE) for node in ast.walk(tree)):
         return None
-    return Candidate(code)
+    return Candidate(code, note)
 
 
 def _as_call(decoded: Any) -> tuple[str, Mapping[str, Any]]:

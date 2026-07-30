@@ -91,6 +91,22 @@ def test_an_empty_message_is_no_match() -> None:
     assert bare("   \n  ") is None
 
 
+def test_bare_python_behind_a_preamble_is_repaired_here() -> None:
+    # No marker delimits the code, so "where does the Python start" is this
+    # strategy's own question. Refusing this would cost an iteration to ask again.
+    candidate = bare("Sure, here you go:\nresult = 1 + 1")
+
+    assert candidate is not None
+    assert candidate.code == "result = 1 + 1"
+    assert candidate.repair_note is not None
+
+
+def test_a_preamble_over_prose_is_still_no_match() -> None:
+    # The repair must not turn a prose reply into code by dropping lines until
+    # something parses.
+    assert bare("Let me think about this.\nIt is probably 42.") is None
+
+
 def test_an_invoke_block_becomes_a_call() -> None:
     candidate = xml(
         '<invoke name="read_file">'
