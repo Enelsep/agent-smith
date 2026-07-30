@@ -150,7 +150,7 @@ class RetryingProvider:
 
     def _sleep_if_it_fits(self, wait: float, started: float) -> bool:
         """Sleep, unless waking up would already be past the budget."""
-        if self._elapsed(started) + wait > self._max_elapsed_seconds:
+        if self._elapsed(started) + wait >= self._max_elapsed_seconds:
             return False
         self._sleep(wait)
         return True

@@ -327,3 +327,18 @@ def test_two_rate_limited_keys_are_parked_and_the_third_answers() -> None:
     assert result.retries == 2
     assert inner.used_keys == ["a", "b", "c"]
     assert sleep.calls == []
+
+
+def test_it_refuses_a_sleep_that_would_land_exactly_on_the_budget() -> None:
+    # Waking up precisely at the deadline buys no attempt: the top of the loop
+    # breaks on `>=`. Sleeping for it would spend wall clock for nothing.
+    retrier, inner, _, sleep = build(
+        [ProviderError("boom", status_code=500), a_response()],
+        max_elapsed_seconds=0.5,
+    )
+
+    with pytest.raises(ProviderError, match="boom"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == []
+    assert len(inner.used_keys) == 1
