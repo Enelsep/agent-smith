@@ -8,6 +8,7 @@ dependencies = [
     "pydantic",
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
+    "mcp>=2.0.0",
 ]
 
 # Every dependency arrives with the ticket that writes the code importing it.
@@ -18,6 +19,7 @@ dev = [
     "mypy",
     "ruff",
     "pytest",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [project.scripts]
@@ -34,6 +36,7 @@ packages = ["src/agent_smith", "src/agent_mbpp", "src/agent_swebench"]
 # Without this, pytest run from the repo root also collects the tests of the
 # moulinette checkout that sits next to us locally, and dies on `import docker`.
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff.lint.per-file-ignores]
 # contract.py mirrors the Pydantic contract the evaluation imposes on us. Its
