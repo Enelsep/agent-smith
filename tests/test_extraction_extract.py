@@ -67,6 +67,20 @@ def test_a_malformed_tool_call_names_its_strategy() -> None:
     assert result.failure
 
 
+def test_an_argument_name_python_cannot_spell_keeps_the_call_whole() -> None:
+    # Rendered as a keyword argument this is a SyntaxError, and the python
+    # repair mistakes the assignment for prose: it drops the line and leaves a
+    # print of a name that was never bound. The sandbox would answer NameError.
+    result = extract_code(
+        '<tool_call>{"name": "read", "arguments": {"start-line": 1}}</tool_call>',
+        step=1,
+    )
+
+    assert result.code == "result_1_1 = read(**{'start-line': 1})\nprint(result_1_1)"
+    assert not result.repaired
+    assert result.repair_note is None
+
+
 def test_prose_alone_matches_nothing() -> None:
     result = extract_code("I think the answer is 42.", step=1)
 

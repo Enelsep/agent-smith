@@ -1,6 +1,7 @@
 """Rewriting a decoded tool call as Python the sandbox can run."""
 
 import json
+import keyword
 from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn
 
@@ -59,11 +60,35 @@ def render_calls(calls: Sequence[tuple[str, Mapping[str, Any]]], step: int) -> s
     type JSON can produce and picks its own quoting. String interpolation would
     turn `12` into `"12"`, `None` into the four-character string `"None"`, and a
     value containing a double quote into a `SyntaxError`.
+
+    Argument names get the same care. JSON and XML both admit names Python
+    cannot spell as a keyword argument — `start-line`, `class`, `2nd` — and
+    `f(start-line=1)` is a `SyntaxError`, which the caller would read as "the
+    model sent bad code" when the payload decoded perfectly well. One such name
+    sends the whole call through `**{...}`, where any string is a legal key. All
+    of them or none of them, because a call cannot mix `**` expansion with
+    keyword arguments that follow it.
     """
     lines: list[str] = []
     for index, (name, arguments) in enumerate(calls, start=1):
         variable = f"result_{step}_{index}"
-        rendered = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
-        lines.append(f"{variable} = {name}({rendered})")
+        lines.append(f"{variable} = {name}({_render_arguments(arguments)})")
         lines.append(f"print({variable})")
     return "\n".join(lines)
+
+
+def _render_arguments(arguments: Mapping[str, Any]) -> str:
+    """The inside of the parentheses: keyword arguments, or one `**` mapping."""
+    if all(_is_keyword_argument_name(key) for key in arguments):
+        return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
+    return f"**{dict(arguments)!r}"
+
+
+def _is_keyword_argument_name(key: str) -> bool:
+    """True when `key=` is something Python will parse.
+
+    Soft keywords (`match`, `case`, `type`) are deliberately allowed: they are
+    only keywords in the grammar positions that give them meaning, and
+    `f(match=1)` is not one of them.
+    """
+    return key.isidentifier() and not keyword.iskeyword(key)

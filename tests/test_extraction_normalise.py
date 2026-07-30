@@ -103,6 +103,26 @@ def test_no_calls_render_to_nothing() -> None:
     assert render_calls([], 1) == ""
 
 
+@pytest.mark.parametrize("key", ["start-line", "class", "2nd", "with space", ""])
+def test_an_argument_name_python_cannot_spell_becomes_a_mapping(key: str) -> None:
+    rendered = render_calls([("f", {key: 1})], 1)
+    statement = ast.parse(rendered).body[0]
+
+    assert isinstance(statement, ast.Assign)
+    call = statement.value
+    assert isinstance(call, ast.Call)
+    assert not call.keywords[0].arg
+    assert ast.literal_eval(call.keywords[0].value) == {key: 1}
+
+
+def test_one_unspellable_name_moves_every_argument_into_the_mapping() -> None:
+    rendered = render_calls([("f", {"path": "/tmp/a.py", "start-line": 1})], 1)
+
+    assert rendered.startswith(
+        "result_1_1 = f(**{'path': '/tmp/a.py', 'start-line': 1})"
+    )
+
+
 def test_the_step_is_part_of_the_variable_name() -> None:
     # The worker builds the namespace once and reuses it, so a name restarting
     # at result_1 every step would overwrite the previous step's value in place.
