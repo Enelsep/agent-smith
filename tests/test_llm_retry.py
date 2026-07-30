@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import pytest
 
 from agent_smith.llm import LLMResponse, Message, ProviderError
-from agent_smith.llm.keypool import KeyPool
+from agent_smith.llm.keypool import AllKeysParked, KeyPool
 from agent_smith.llm.retry import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_ELAPSED_SECONDS,
@@ -231,3 +231,99 @@ def test_it_forwards_the_startup_check_to_the_provider_it_wraps() -> None:
     retrier.validate_model()
 
     assert inner.validated is True
+
+
+def test_the_budget_stops_the_loop_before_the_attempts_run_out() -> None:
+    # Three attempts are allowed, but the first sleep consumes the budget.
+    retrier, inner, _, sleep = build(
+        [
+            ProviderError("boom", status_code=500),
+            ProviderError("boom", status_code=500),
+            a_response(),
+        ],
+        max_elapsed_seconds=0.6,
+    )
+
+    with pytest.raises(ProviderError, match="boom"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == [0.5]
+    assert len(inner.used_keys) == 2
+
+
+def test_it_never_sleeps_past_the_budget() -> None:
+    retrier, inner, _, sleep = build(
+        [ProviderError("boom", status_code=500), a_response()],
+        max_elapsed_seconds=0.25,
+    )
+
+    with pytest.raises(ProviderError, match="boom"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == []
+    assert len(inner.used_keys) == 1
+
+
+def test_it_waits_for_a_parked_pool_when_the_wait_fits() -> None:
+    retrier, inner, _, sleep = build(
+        [
+            ProviderError("slow down", status_code=429, headers={"retry-after": "2"}),
+            a_response(),
+        ],
+        keys=("only",),
+    )
+
+    result = retrier.complete(MESSAGES)
+
+    # Three attempts: the 429, the one that found the pool empty and waited,
+    # and the one that succeeded. Only two reached the provider, because
+    # `api_key()` raised before the second could send anything.
+    assert result.retries == 2
+    assert sleep.calls == [2.0]
+    assert inner.used_keys == ["only", "only"]
+
+
+def test_it_gives_up_when_the_parked_pool_frees_after_the_budget() -> None:
+    retrier, inner, _, sleep = build(
+        [
+            ProviderError("slow down", status_code=429, headers={"retry-after": "300"}),
+            a_response(),
+        ],
+        keys=("only",),
+    )
+
+    # The error that surfaces is the pool refusing, not the 429 that caused it:
+    # the last failure seen is what the loop re-raises.
+    with pytest.raises(AllKeysParked, match="rate limited or rejected"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == []
+    assert len(inner.used_keys) == 1
+
+
+def test_a_rejected_only_key_gives_up_rather_than_waiting_forever() -> None:
+    retrier, _, _, sleep = build(
+        [ProviderError("unauthorized", status_code=401), a_response()],
+        keys=("only",),
+    )
+
+    with pytest.raises(AllKeysParked, match="rate limited or rejected"):
+        retrier.complete(MESSAGES)
+
+    assert sleep.calls == []
+
+
+def test_two_rate_limited_keys_are_parked_and_the_third_answers() -> None:
+    retrier, inner, _, sleep = build(
+        [
+            ProviderError("slow down", status_code=429, headers={"retry-after": "60"}),
+            ProviderError("slow down", status_code=429, headers={"retry-after": "60"}),
+            a_response(),
+        ]
+    )
+
+    result = retrier.complete(MESSAGES)
+
+    assert result.retries == 2
+    assert inner.used_keys == ["a", "b", "c"]
+    assert sleep.calls == []
