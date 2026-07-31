@@ -269,6 +269,66 @@ def test_a_step_without_a_restart_says_nothing_about_the_namespace() -> None:
     assert observation.NAMESPACE_LOST not in provider.calls[1][-1]["content"]
 
 
+@pytest.mark.parametrize(
+    "executed",
+    [
+        pytest.param(
+            ExecResult(
+                outcome=Outcome.ERROR,
+                error="ZeroDivisionError: division by zero",
+            ),
+            id="error",
+        ),
+        pytest.param(
+            ExecResult(
+                outcome=Outcome.SOFT_TIMEOUT,
+                error="Execution exceeded the sandbox time limit",
+            ),
+            id="soft_timeout",
+        ),
+        pytest.param(
+            # Built by the parent process, not the worker: stdout/stderr stay
+            # empty, unlike ERROR and SOFT_TIMEOUT which come from the worker.
+            ExecResult(
+                outcome=Outcome.HARD_TIMEOUT,
+                error="code did not return control after 35s and could not "
+                "be interrupted",
+            ),
+            id="hard_timeout",
+        ),
+        pytest.param(
+            ExecResult(
+                outcome=Outcome.CRASHED,
+                error="the sandbox worker died mid-execution",
+            ),
+            id="crashed",
+        ),
+        pytest.param(
+            ExecResult(
+                outcome=Outcome.SHUTDOWN,
+                error="KeyboardInterrupt: ",
+            ),
+            id="shutdown",
+        ),
+    ],
+)
+def test_a_non_terminal_outcome_still_reaches_a_final_answer(
+    executed: ExecResult,
+) -> None:
+    # None of these outcomes end the run: they are rendered as an observation
+    # like any other, and the loop turns to a second iteration exactly as it
+    # would after Outcome.OK.
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([executed, answered("done")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is True
+    assert solution.solution == "done"
+    assert solution.iterations == 2
+    assert solution.error is None
+
+
 def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None:
     def only_the_last(messages: list[Message]) -> list[Message]:
         return messages[-1:]
