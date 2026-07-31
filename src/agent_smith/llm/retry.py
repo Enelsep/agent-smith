@@ -50,10 +50,14 @@ class ValidatingProvider(Protocol):
 def _backoff(attempt: int, jitter: Jitter) -> float:
     """Full jitter, so several keys hitting one provider spread out.
 
-    The cap is inert at the default attempt count — the draws come from
-    `[0, 0.5]`, `[0, 1]` and `[0, 2]`. It bounds a caller that raises
-    `max_attempts`, where doubling would reach 8 s and spend a whole budget on
-    one sleep.
+    At the default attempt count the draws are `[0, 0.5]`, `[0, 1]` and
+    `[0, 2]`, and only the first two are ever slept on: the loop computes the
+    final attempt's delay and then breaks, so 1 s is the longest wait actually
+    taken.
+
+    The cap first clips at `attempt = 4`, where doubling reaches 8 s and would
+    spend a whole budget on one sleep. With the last draw discarded, that puts
+    it at `max_attempts = 6` before the cap changes any sleep a caller sees.
     """
     return jitter(0.0, min(_BACKOFF_BASE_SECONDS * 2**attempt, _BACKOFF_CAP_SECONDS))
 
