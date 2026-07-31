@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 
+from agent_smith.agent import observation
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.llm import LLMResponse, Message
@@ -191,3 +192,92 @@ def test_the_run_is_timed_by_the_injected_clock() -> None:
     solution = run_task(a_task(), provider, sandbox, clock=clock)
 
     assert solution.total_time_seconds == 1.5
+
+
+def failed_extraction() -> LLMResponse:
+    """A reply with no code block at all, so CORE-3 finds nothing to run."""
+    return a_response("I think the answer is probably 42, but I am not sure.")
+
+
+def test_a_second_attempt_sees_the_first_observation() -> None:
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("41\n"), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert provider.calls[1] == [
+        {"role": "system", "content": "You are a careful Python programmer."},
+        {"role": "user", "content": "Write a function that adds two numbers."},
+        {"role": "assistant", "content": "```python\nprint(1)\n```"},
+        {"role": "user", "content": "41"},
+    ]
+
+
+def test_the_transcript_grows_by_two_messages_per_iteration() -> None:
+    provider = FakeProvider([a_response(), a_response(), a_response()])
+    sandbox = FakeSandbox([ok("a\n"), ok("b\n"), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert [len(call) for call in provider.calls] == [2, 4, 6]
+
+
+def test_a_reply_with_no_code_never_reaches_the_sandbox() -> None:
+    provider = FakeProvider([failed_extraction(), a_response()])
+    sandbox = FakeSandbox([answered("done")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert len(sandbox.received) == 1
+    assert sandbox.received[0] == "print(1)"
+    assert solution.steps[0].sandbox_input == ""
+    assert solution.steps[0].sandbox_output == ""
+
+
+def test_a_reply_with_no_code_still_tells_the_model_what_went_wrong() -> None:
+    provider = FakeProvider([failed_extraction(), a_response()])
+    sandbox = FakeSandbox([answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    said = provider.calls[1][-1]["content"]
+    assert said != ""
+    assert provider.calls[1][-1]["role"] == "user"
+
+
+def test_a_silent_restart_warns_that_the_namespace_is_gone() -> None:
+    # The sandbox restarts on its own when it finds a dead worker between
+    # calls, and that path can still answer OK. Comparing `restarts` catches
+    # it; reading the outcome would not.
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("fine\n"), answered("done")], restarts_before=[1])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert observation.NAMESPACE_LOST in provider.calls[1][-1]["content"]
+
+
+def test_a_step_without_a_restart_says_nothing_about_the_namespace() -> None:
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("fine\n"), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert observation.NAMESPACE_LOST not in provider.calls[1][-1]["content"]
+
+
+def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None:
+    def only_the_last(messages: list[Message]) -> list[Message]:
+        return messages[-1:]
+
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("41\n"), answered("done")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, compact=only_the_last, clock=FakeClock()
+    )
+
+    assert [len(call) for call in provider.calls] == [1, 1]
+    # The full reply is still reported, because compaction shaped the view and
+    # not the transcript.
+    assert solution.steps[0].llm_output == "```python\nprint(1)\n```"
