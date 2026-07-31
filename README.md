@@ -24,3 +24,12 @@ outgrow it.
 
 What the agent never does, at any point and by any route: fetch task data,
 repositories, or reference solutions.
+
+## Reading what the model wrote
+
+Model replies are parsed by `agent_smith.extraction`, which accepts fenced Python,
+Anthropic-style `<invoke>` XML, Hermes `<tool_call>` JSON and ReAct `Action:` pairs, and
+rewrites everything that is not already Python into a Python call string. It performs no
+network access and knows nothing about which tools exist: an unknown tool name is
+normalised like any other and fails in the sandbox, where the model reads the error and
+tries again.
