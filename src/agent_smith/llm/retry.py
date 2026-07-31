@@ -35,6 +35,10 @@ class ValidatingProvider(Protocol):
 
     `LLMProvider` plus the startup check, because a wrapper that hid
     `validate_model()` would cost the caller a check CORE-1 built.
+
+    A Protocol rather than `OpenAICompatProvider` itself: `openai_compat`
+    imports this module to assemble the retrier, so naming that class here
+    would close an import cycle.
     """
 
     def complete(
