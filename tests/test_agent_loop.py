@@ -2,10 +2,13 @@
 
 from collections.abc import Sequence
 
+import pytest
+
 from agent_smith.agent import observation
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.llm import LLMResponse, Message, ProviderError
+from agent_smith.models.contract import SolutionOutput
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 
@@ -372,3 +375,87 @@ def test_total_requests_counts_the_retries_core2_spent() -> None:
     solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
 
     assert solution.total_requests == 4
+
+
+class ExplodingSandbox:
+    """A sandbox whose worker cannot be reached, the way `Sandbox` reports it."""
+
+    restarts = 0
+
+    def execute(self, code: str) -> ExecResult:
+        raise RuntimeError("sandbox has no live connection to its worker")
+
+
+class InterruptingSandbox:
+    restarts = 0
+
+    def execute(self, code: str) -> ExecResult:
+        raise KeyboardInterrupt
+
+
+def test_an_unexpected_failure_becomes_a_failed_result_not_a_traceback() -> None:
+    provider = FakeProvider([a_response()])
+
+    solution = run_task(a_task(), provider, ExplodingSandbox(), clock=FakeClock())
+
+    assert solution.success is False
+    assert solution.error is not None
+    assert "no live connection" in solution.error
+    assert solution.task_id == "11"
+
+
+def test_what_the_run_had_done_survives_an_unexpected_failure() -> None:
+    provider = FakeProvider([a_response(input_tokens=99), a_response()])
+
+    class FailsOnTheSecondCall:
+        restarts = 0
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, code: str) -> ExecResult:
+            self.calls += 1
+            if self.calls == 1:
+                return ok("first\n")
+            raise RuntimeError("the worker died")
+
+    solution = run_task(a_task(), provider, FailsOnTheSecondCall(), clock=FakeClock())
+
+    assert solution.success is False
+    assert solution.iterations == 1
+    assert solution.total_input_tokens == 99
+
+
+def test_a_keyboard_interrupt_still_reaches_the_caller() -> None:
+    # The counter-test for the boundary: catching BaseException instead of
+    # Exception would swallow this, and nothing else would notice.
+    provider = FakeProvider([a_response()])
+
+    with pytest.raises(KeyboardInterrupt):
+        run_task(a_task(), provider, InterruptingSandbox(), clock=FakeClock())
+
+
+def test_a_system_exit_still_reaches_the_caller() -> None:
+    class ExitingSandbox:
+        restarts = 0
+
+        def execute(self, code: str) -> ExecResult:
+            raise SystemExit(1)
+
+    provider = FakeProvider([a_response()])
+
+    with pytest.raises(SystemExit):
+        run_task(a_task(), provider, ExitingSandbox(), clock=FakeClock())
+
+
+def test_the_result_of_a_real_run_satisfies_the_contract() -> None:
+    # The wiring test: the real extractor, a scripted provider and sandbox.
+    provider = FakeProvider(
+        [a_response("Here you go:\n```python\nresult = 1 + 1\nprint(result)\n```")]
+    )
+    sandbox = FakeSandbox([answered("def add(a, b):\n    return a + b")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert sandbox.received == ["result = 1 + 1\nprint(result)"]
+    assert SolutionOutput.model_validate_json(solution.model_dump_json()) == solution
