@@ -64,9 +64,10 @@ def run_task(
     run = _Run(task, clock)
     try:
         run.execute(provider, sandbox, max_iterations, compact)
+        return run.to_solution()
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         run.error = f"the agent loop failed: {unexpected}"
-    return run.to_solution()
+        return run.to_solution()
 
 
 class _Run:
