@@ -129,17 +129,17 @@ class RetryingProvider:
     ) -> LLMResponse:
         """One completion, retried while it is worth it and the budget allows."""
         started = self._clock()
-        last: ProviderError | None = None
+        last_error: ProviderError | None = None
         for attempt in range(self._max_attempts):
             if attempt and self._elapsed(started) >= self._max_elapsed_seconds:
                 break
             try:
                 answer = self._inner.complete(messages, stop, max_tokens)
             except AllKeysParked as parked:
-                last = parked
+                last_error = parked
                 wait = parked.available_at - self._clock()
             except ProviderError as error:
-                last = error
+                last_error = error
                 self._pool.penalise(error)
                 delay = _retry_delay(error, attempt, self._jitter)
                 if delay is None:
@@ -151,9 +151,12 @@ class RetryingProvider:
                 break
             if wait > 0 and not self._sleep_if_it_fits(wait, started):
                 break
-        if last is None:  # pragma: no cover - max_attempts is at least 1
+        # Dead at runtime — `max_attempts` is at least 1, so the loop always
+        # sets `last_error` before it ends. Kept because it is the narrowing
+        # that lets the next line raise: an `Optional` cannot be raised.
+        if last_error is None:  # pragma: no cover
             raise ProviderError("the retry loop made no attempt")
-        raise last
+        raise last_error
 
     def _elapsed(self, started: float) -> float:
         return self._clock() - started
