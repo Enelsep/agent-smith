@@ -330,7 +330,10 @@ def test_a_non_terminal_outcome_still_reaches_a_final_answer(
 
 
 def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None:
+    seen: list[list[Message]] = []
+
     def only_the_last(messages: list[Message]) -> list[Message]:
+        seen.append(list(messages))
         return messages[-1:]
 
     provider = FakeProvider([a_response(), a_response()])
@@ -341,6 +344,15 @@ def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None
     )
 
     assert [len(call) for call in provider.calls] == [1, 1]
+    # The second call is what proves the transcript itself was never touched:
+    # it still carries all four messages, not the one-message view compact
+    # handed to the provider on the call before.
+    assert seen[1] == [
+        {"role": "system", "content": "You are a careful Python programmer."},
+        {"role": "user", "content": "Write a function that adds two numbers."},
+        {"role": "assistant", "content": "```python\nprint(1)\n```"},
+        {"role": "user", "content": "41"},
+    ]
     # The full reply is still reported, because compaction shaped the view and
     # not the transcript.
     assert solution.steps[0].llm_output == "```python\nprint(1)\n```"
