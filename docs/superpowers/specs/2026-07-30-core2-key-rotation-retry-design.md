@@ -316,3 +316,8 @@ and the two rate-limited keys are parked.
   `retry-after`.
 - **Concurrency.** The "last lent" attribution assumes one request in flight. Making the pool
   safe under concurrency means leasing keys explicitly, which changes `KeySource`.
+- **Validation as a step of its own.** `RetryingProvider` forwards `validate_model()`, which is
+  the only reason `ValidatingProvider` exists. A free `validate_model(config, *, client)` would
+  drop both, keep `LLMProvider` down to `complete()`, and stop every future decorator relaying a
+  startup check. It changes CORE-1's surface, so it wants a real caller to be designed against:
+  CORE-5 is the first one.
