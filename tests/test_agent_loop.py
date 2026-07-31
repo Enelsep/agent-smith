@@ -156,6 +156,24 @@ def test_one_step_is_recorded_from_the_response() -> None:
     assert step.sandbox_input == "print(1)"
 
 
+def test_the_winning_step_records_stderr_alongside_stdout() -> None:
+    # Code that warns on stderr before calling final_answer() must not lose
+    # that warning: sandbox_output combines both streams, matching how
+    # observation._body renders a non-winning step.
+    provider = FakeProvider([a_response()])
+    sandbox = FakeSandbox(
+        [
+            ExecResult(
+                outcome=Outcome.FINAL_ANSWER, final_answer="done", stderr="warned\n"
+            )
+        ]
+    )
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.steps[0].sandbox_output == "warned"
+
+
 def test_the_endpoint_is_recorded_in_full() -> None:
     # The moulinette only prints this field, so the full endpoint CORE-1
     # produced is kept rather than truncated to a base URL.

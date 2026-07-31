@@ -44,6 +44,19 @@ def from_execution(
     return "\n\n".join(parts)
 
 
+def combined_output(executed: ExecResult) -> str:
+    """`stdout` and `stderr`, stripped and joined the way the model reads them.
+
+    The worker captures the two streams separately; joining them here is what
+    lets a step that only wrote to stderr still show up as output.
+    """
+    return "\n".join(
+        stream.strip()
+        for stream in (executed.stdout, executed.stderr)
+        if stream.strip()
+    )
+
+
 def _body(executed: ExecResult) -> str:
     """What the sandbox itself has to say about this execution.
 
@@ -56,11 +69,7 @@ def _body(executed: ExecResult) -> str:
             # for an observation, so this renders only for a caller that does.
             return executed.final_answer
         return EMPTY_ANSWER
-    printed = "\n".join(
-        stream.strip()
-        for stream in (executed.stdout, executed.stderr)
-        if stream.strip()
-    )
+    printed = combined_output(executed)
     if executed.outcome is Outcome.OK:
         return printed or NO_OUTPUT
     detail = executed.error or f"The sandbox reported {executed.outcome.value}."

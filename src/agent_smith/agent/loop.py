@@ -120,7 +120,12 @@ class _Run:
                 if executed.outcome is Outcome.FINAL_ANSWER and executed.final_answer:
                     self.solution = executed.final_answer
                     self.success = True
-                    self._record(step, answer, extracted.code, executed.stdout)
+                    self._record(
+                        step,
+                        answer,
+                        extracted.code,
+                        observation.combined_output(executed),
+                    )
                     return
                 said = observation.from_execution(
                     executed,
