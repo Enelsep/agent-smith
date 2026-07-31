@@ -14,8 +14,10 @@ from agent_smith.llm.response import LLMResponse
 # a count is only the backstop against an endpoint failing instantly forever.
 DEFAULT_MAX_ATTEMPTS = 3
 
-# Two thirds of one MBPP task's 120 s, which several calls have to share. CORE-5
-# passes a smaller number once it knows the real remaining wall clock.
+# A sixth of one MBPP task's 120 s, which several calls have to share. Shorter
+# than the 30 s socket timeout, so an endpoint that hangs gets one attempt and
+# no more. CORE-5 passes a smaller number once it knows the real remaining wall
+# clock.
 DEFAULT_MAX_ELAPSED_SECONDS = 20.0
 
 _BACKOFF_BASE_SECONDS = 0.5
