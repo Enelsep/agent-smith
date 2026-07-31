@@ -51,6 +51,10 @@ def _body(executed: ExecResult) -> str:
     `MAX_OUTPUT_CHARS` with an explicit marker.
     """
     if executed.outcome is Outcome.FINAL_ANSWER:
+        if executed.final_answer:
+            # The loop consumes an answer that carries a value and never asks
+            # for an observation, so this renders only for a caller that does.
+            return executed.final_answer
         return EMPTY_ANSWER
     printed = "\n".join(
         stream.strip()

@@ -92,3 +92,12 @@ def test_final_answer_called_with_nothing_asks_for_the_answer_again() -> None:
     executed = ExecResult(outcome=Outcome.FINAL_ANSWER, final_answer=None)
 
     assert observation.from_execution(executed) == observation.EMPTY_ANSWER
+
+
+def test_a_final_answer_that_carries_a_value_is_shown_rather_than_denied() -> None:
+    # The loop consumes a valued answer instead of asking for an observation,
+    # so nothing in the current call graph reaches this. The branch exists so
+    # that a caller which does reach it is not told it submitted nothing.
+    executed = ExecResult(outcome=Outcome.FINAL_ANSWER, final_answer="the answer")
+
+    assert observation.from_execution(executed) == "the answer"
