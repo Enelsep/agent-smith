@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from agent_smith.agent import observation
 from agent_smith.extraction import extract_code
-from agent_smith.llm import LLMResponse, Message
+from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput, StepMetrics
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
@@ -98,7 +98,14 @@ class _Run:
     ) -> None:
         """Turn the loop until an answer arrives or the iterations run out."""
         for step in range(1, max_iterations + 1):
-            answer = provider.complete(compact(self.history))
+            try:
+                answer = provider.complete(compact(self.history))
+            except ProviderError as refused:
+                # CORE-2 has already retried across the key pool and spent its
+                # budget. Retrying here would stack two policies and burn the
+                # task's wall clock; the message is kept as it came.
+                self.error = str(refused)
+                return
             self.history.append({"role": "assistant", "content": answer.text})
             extracted = extract_code(answer.text, step=step)
             if extracted.code is None:
@@ -121,6 +128,10 @@ class _Run:
                 )
                 self._record(step, answer, extracted.code, said)
             self.history.append({"role": "user", "content": said})
+        self.error = (
+            f"the agent used all {max_iterations} iterations without calling "
+            "final_answer()"
+        )
 
     def _record(
         self,

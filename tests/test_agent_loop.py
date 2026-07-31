@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from agent_smith.agent import observation
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
-from agent_smith.llm import LLMResponse, Message
+from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 
@@ -281,3 +281,94 @@ def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None
     # The full reply is still reported, because compaction shaped the view and
     # not the transcript.
     assert solution.steps[0].llm_output == "```python\nprint(1)\n```"
+
+
+def test_running_out_of_iterations_fails_without_raising() -> None:
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("a\n"), ok("b\n")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, max_iterations=2, clock=FakeClock()
+    )
+
+    assert solution.success is False
+    assert solution.iterations == 2
+    assert solution.solution == ""
+    assert solution.error is not None
+    assert "2 iterations" in solution.error
+
+
+def test_a_provider_failure_ends_the_run_with_its_message_intact() -> None:
+    # CORE-2 has already spent three attempts, key rotation and its budget.
+    # The message is kept verbatim so CORE-7 can see which case to catch.
+    provider = FakeProvider(
+        [a_response(), ProviderError("endpoint answered 413", status_code=413)]
+    )
+    sandbox = FakeSandbox([ok("a\n")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is False
+    assert solution.error == "endpoint answered 413"
+    assert solution.iterations == 1
+
+
+def test_a_provider_failure_on_the_first_call_still_returns_a_result() -> None:
+    provider = FakeProvider([ProviderError("all 3 API keys are rate limited")])
+    sandbox = FakeSandbox([])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is False
+    assert solution.iterations == 0
+    assert solution.total_requests == 0
+    assert solution.error == "all 3 API keys are rate limited"
+
+
+def test_final_answer_with_nothing_asks_again_rather_than_submitting_empty() -> None:
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([answered(None), answered("the real answer")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is True
+    assert solution.solution == "the real answer"
+    assert solution.iterations == 2
+    assert observation.EMPTY_ANSWER in provider.calls[1][-1]["content"]
+
+
+def test_final_answer_with_an_empty_string_is_treated_the_same() -> None:
+    provider = FakeProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([answered(""), answered("the real answer")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.solution == "the real answer"
+    assert solution.iterations == 2
+
+
+def test_the_totals_are_sums_over_the_steps() -> None:
+    provider = FakeProvider(
+        [
+            a_response(input_tokens=100, output_tokens=10),
+            a_response(input_tokens=250, output_tokens=20),
+        ]
+    )
+    sandbox = FakeSandbox([ok("a\n"), answered("done")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.total_input_tokens == 350
+    assert solution.total_output_tokens == 30
+    assert solution.iterations == len(solution.steps) == 2
+
+
+def test_total_requests_counts_the_retries_core2_spent() -> None:
+    # The field asks for real API requests, and CORE-2 may have made several
+    # per step. One call with two retries is three requests.
+    provider = FakeProvider([a_response(retries=2), a_response(retries=0)])
+    sandbox = FakeSandbox([ok("a\n"), answered("done")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.total_requests == 4
