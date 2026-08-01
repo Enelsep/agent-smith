@@ -91,3 +91,39 @@ class TestLLMResponse:
             # plugin is not enabled, so a direct assignment would need a
             # `type: ignore` that mypy then reports as unused.
             setattr(response, "text", "tampered")  # noqa: B010
+
+
+class TestAfterRetries:
+    def a_response(self) -> LLMResponse:
+        return LLMResponse(
+            text="ok",
+            input_tokens=11,
+            output_tokens=7,
+            latency_ms=120.5,
+            model="qwen",
+            api_url="https://example.invalid/v1/chat/completions",
+        )
+
+    def test_it_records_the_count_without_touching_anything_else(self) -> None:
+        original = self.a_response()
+
+        recorded = original.after_retries(2)
+
+        assert recorded.retries == 2
+        assert recorded.text == original.text
+        assert recorded.input_tokens == original.input_tokens
+        assert recorded.output_tokens == original.output_tokens
+        assert recorded.latency_ms == original.latency_ms
+        assert recorded.model == original.model
+        assert recorded.api_url == original.api_url
+
+    def test_the_original_is_left_alone(self) -> None:
+        original = self.a_response()
+
+        original.after_retries(3)
+
+        assert original.retries == 0
+
+    def test_it_validates_rather_than_copies_blindly(self) -> None:
+        with pytest.raises(ValidationError):
+            self.a_response().after_retries("two")  # type: ignore[arg-type]

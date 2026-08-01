@@ -14,12 +14,14 @@ import pytest
 
 from agent_smith.config import ConfigError, ResolvedConfig
 from agent_smith.llm import LLMProvider, LLMResponse, Message, ProviderError
+from agent_smith.llm.keypool import AllKeysParked
 from agent_smith.llm.openai_compat import (
     DEFAULT_TIMEOUT_SECONDS,
     OpenAICompatProvider,
     StaticKeySource,
     provider_from_config,
 )
+from agent_smith.llm.retry import RetryingProvider
 from agent_smith.models.contract import SandboxConfig
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -57,6 +59,23 @@ def _exploding_client() -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def _provider(config: ResolvedConfig, *, client: httpx.Client) -> OpenAICompatProvider:
+    """Build the provider directly, the way these isolation tests need it.
+
+    These tests exercise `OpenAICompatProvider`'s own contract — one request,
+    no retries — so they construct it themselves rather than through
+    `provider_from_config`, which also assembles the retry policy around it.
+    """
+    return OpenAICompatProvider(
+        base_url=config.base_url,
+        model=config.model_name,
+        key_source=StaticKeySource(config.api_keys),
+        stop=list(config.stop),
+        max_tokens=config.max_tokens,
+        client=client,
+    )
+
+
 class TestStaticKeySource:
     def test_it_serves_the_first_key_of_the_pool(self) -> None:
         assert StaticKeySource(["first", "second"]).api_key() == "first"
@@ -78,7 +97,7 @@ def test_the_provider_satisfies_the_protocol_the_rest_of_the_system_imports() ->
     stops `complete()` drifting out of the contract CORE-2 and CORE-4 code
     against. The assertion is incidental; the type annotation is the test.
     """
-    provider: LLMProvider = provider_from_config(_config(), client=_exploding_client())
+    provider: LLMProvider = _provider(_config(), client=_exploding_client())
     assert provider.complete is not None
 
 
@@ -94,7 +113,7 @@ class TestConstruction:
         )
 
     def test_it_reads_its_endpoint_and_defaults_off_the_resolved_config(self) -> None:
-        provider = provider_from_config(_config(), client=_exploding_client())
+        provider = _provider(_config(), client=_exploding_client())
         assert provider.completions_url == (
             "https://api.groq.com/openai/v1/chat/completions"
         )
@@ -102,7 +121,7 @@ class TestConstruction:
         assert provider.model == "llama-3.3-70b-versatile"
 
     def test_a_trailing_slash_on_the_base_url_does_not_double_up(self) -> None:
-        provider = provider_from_config(
+        provider = _provider(
             _config(base_url="https://api.groq.com/openai/v1/"),
             client=_exploding_client(),
         )
@@ -159,7 +178,7 @@ def _recording_provider(
         return httpx.Response(status_code, json=body or _completion_body())
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(**overrides), client=client)
+    return _provider(_config(**overrides), client=client)
 
 
 _PROMPT: list[Message] = [{"role": "user", "content": "add two numbers"}]
@@ -273,7 +292,7 @@ class TestCompleteResponse:
 def _failing_provider(handler: Handler) -> OpenAICompatProvider:
     """A provider whose transport runs the given handler."""
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 def _responding_provider(
@@ -290,7 +309,7 @@ def _responding_provider(
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 class TestCompleteErrors:
@@ -373,7 +392,7 @@ class TestCompleteErrors:
 
 def _models_provider(handler: Handler) -> OpenAICompatProvider:
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return provider_from_config(_config(), client=client)
+    return _provider(_config(), client=client)
 
 
 def _serving(*model_ids: str) -> Handler:
@@ -436,3 +455,66 @@ class TestValidateModel:
         # An endpoint that answers but serves nothing has told us nothing.
         _models_provider(_serving()).validate_model()
         assert "warning" in capsys.readouterr().err
+
+
+class TestAssembly:
+    def test_the_factory_returns_the_retrying_provider(self) -> None:
+        assembled = provider_from_config(_config(), client=_exploding_client())
+
+        assert isinstance(assembled, RetryingProvider)
+
+    def test_the_assembled_provider_still_validates_its_model(self) -> None:
+        config = _config()
+        client = httpx.Client(
+            transport=httpx.MockTransport(_serving(config.model_name))
+        )
+
+        provider_from_config(config, client=client).validate_model()
+
+    def test_an_assembled_provider_retries_a_rate_limit_and_answers(self) -> None:
+        # One key rate-limited, the next one serves. This is the whole card in
+        # one call: the pool parks the first key, the retrier moves on, and the
+        # caller gets a completion that says it took two attempts.
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.headers["authorization"])
+            if len(seen) == 1:
+                return httpx.Response(429)
+            return httpx.Response(200, json=_completion_body())
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        assembled = provider_from_config(
+            _config(api_keys=["first", "second"]), client=client
+        )
+        messages: list[Message] = [{"role": "user", "content": "hi"}]
+
+        result = assembled.complete(messages)
+
+        assert result.retries == 1
+        assert result.text == "print(1)"
+        assert seen == ["Bearer first", "Bearer second"]
+
+    def test_the_retrier_and_the_provider_draw_from_one_pool(self) -> None:
+        # Two pools would leave the feedback loop open: the retrier would park
+        # keys in a pool nobody draws from. The third attempt is what exposes
+        # it — with one pool there is no key left to hand out, with two the
+        # provider's own pool cheerfully comes back round to the first.
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.headers["authorization"])
+            if len(seen) <= 2:
+                return httpx.Response(429)
+            return httpx.Response(200, json=_completion_body())
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        assembled = provider_from_config(
+            _config(api_keys=["first", "second"]), client=client
+        )
+        messages: list[Message] = [{"role": "user", "content": "hi"}]
+
+        with pytest.raises(AllKeysParked):
+            assembled.complete(messages)
+
+        assert seen == ["Bearer first", "Bearer second"]
