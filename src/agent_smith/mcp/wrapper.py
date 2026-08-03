@@ -1,164 +1,100 @@
 """
-Dynamic tool wrapper factory and Pydantic schema validation for MCP tools.
+MCP Tool Wrapper module.
+
+Dynamically constructs Python functions with proper signatures and docstrings
+from MCPToolDefinition objects.
 """
 
 import inspect
+import keyword
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import pydantic
-from pydantic import BaseModel, Field, create_model
+from agent_smith.mcp.protocol import MCPClientProtocol, MCPToolDefinition
 
 logger = logging.getLogger(__name__)
 
 
-def _json_type_to_python(prop: dict[str, Any]) -> Any:
-    """Maps JSON schema types to native Python types."""
-    jtype = prop.get("type")
-
-    if jtype == "string":
-        return str
-    elif jtype == "integer":
-        return int
-    elif jtype == "number":
-        return float
-    elif jtype == "boolean":
-        return bool
-    elif jtype == "array":
-        items = prop.get("items", {})
-        item_type = _json_type_to_python(items) if items else Any
-        return list[item_type]  # type: ignore[valid-type]
-    elif jtype == "object":
-        return dict[str, Any]
-
-    if "anyOf" in prop or "oneOf" in prop:
-        return Any
-
-    return Any
-
-
-def json_schema_to_pydantic_model(
-    model_name: str, schema: dict[str, Any]
-) -> type[BaseModel]:
+def sanitize_param_name(name: str) -> str:
     """
-    Dynamically builds a Pydantic model from an MCP tool JSON schema.
+    Sanitizes a parameter name to ensure it is a valid Python identifier.
+    Converts kebab-case to snake_case and appends '_' to Python keywords.
     """
-    properties = schema.get("properties", {})
-    required = set(schema.get("required", []))
+    sanitized = re.sub(r"\W", "_", name)
+    if re.match(r"^\d", sanitized):
+        sanitized = f"_{sanitized}"
+    if keyword.iskeyword(sanitized):
+        sanitized = f"{sanitized}_"
+    return sanitized
 
-    fields: dict[str, Any] = {}
 
-    for prop_name, prop_spec in properties.items():
-        py_type = _json_type_to_python(prop_spec)
-        description = prop_spec.get("description", "")
+def build_inspect_signature(
+    input_schema: dict[str, Any],
+) -> tuple[inspect.Signature, dict[str, str]]:
+    """
+    Builds an inspect.Signature from a JSON Schema input_schema and creates
+    a mapping from sanitized parameter names back to original schema names.
 
-        if prop_name in required:
-            fields[prop_name] = (py_type, Field(..., description=description))
+    Returns:
+        tuple containing (Signature, alias_map where key=sanitized, val=original)
+    """
+    properties = input_schema.get("properties", {})
+    required_params = set(input_schema.get("required", []))
+
+    parameters: list[inspect.Parameter] = []
+    alias_map: dict[str, str] = {}
+
+    req_items = []
+    opt_items = []
+
+    for name, spec in properties.items():
+        if name in required_params:
+            req_items.append((name, spec))
         else:
-            default = prop_spec.get("default", None)
-            fields[prop_name] = (
-                py_type | None,
-                Field(default=default, description=description),
-            )
+            opt_items.append((name, spec))
 
-    return create_model(model_name, **fields)
+    for orig_name, spec in req_items + opt_items:
+        clean_name = sanitize_param_name(orig_name)
+        alias_map[clean_name] = orig_name
 
+        is_req = orig_name in required_params
+        default = inspect.Parameter.empty if is_req else None
 
-def build_inspect_signature(schema: dict[str, Any]) -> inspect.Signature:
-    """
-    Generates a native Python signature (`inspect.Signature`) from the JSON schema.
-    Orders required parameters first to respect Python syntax.
-    """
-    properties = schema.get("properties", {})
-    required = set(schema.get("required", []))
-
-    req_names = [p for p in properties if p in required]
-    opt_names = [p for p in properties if p not in required]
-
-    params: list[inspect.Parameter] = []
-    for name in req_names + opt_names:
-        prop = properties[name]
-        py_type = _json_type_to_python(prop)
-        default = (
-            inspect.Parameter.empty if name in required else prop.get("default", None)
-        )
-        params.append(
+        parameters.append(
             inspect.Parameter(
-                name=name,
+                name=clean_name,
                 kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                 default=default,
-                annotation=py_type,
             )
         )
 
-    return inspect.Signature(parameters=params)
+    return inspect.Signature(parameters), alias_map
 
 
-def create_tool_wrapper(
-    tool_name: str,
-    description: str,
-    input_schema: dict[str, Any],
-    call_tool_fn: Callable[[str, dict[str, Any]], Awaitable[str]],
+def build_mcp_tool_wrapper(
+    client: MCPClientProtocol,
+    tool_def: MCPToolDefinition,
 ) -> Callable[..., Awaitable[str]]:
     """
-    Creates an async callable wrapper function for an MCP tool.
-
-    Features:
-    1. Dynamic Pydantic model for pre-flight local argument validation.
-    2. Native `inspect.Signature` accessible via `inspect.signature(func)`.
-    3. Enriched docstring with tool description and parameter details.
-    4. Validation errors formatted as Observations to keep the agent loop resilient.
+    Constructs an async Python wrapper for an MCP tool.
     """
-    # 1. Generate dynamic Pydantic model
-    model = json_schema_to_pydantic_model(f"{tool_name}_Input", input_schema)
+    sig, alias_map = build_inspect_signature(tool_def.input_schema)
 
-    # 2. Build Python signature
-    sig = build_inspect_signature(input_schema)
-
-    # 3. Format docstring
-    doc_lines = [description or f"MCP Tool: {tool_name}", "\nParameters:"]
-    properties = input_schema.get("properties", {})
-    required = set(input_schema.get("required", []))
-
-    for prop_name, prop_spec in properties.items():
-        is_req = "required" if prop_name in required else "optional"
-        prop_desc = prop_spec.get("description", "")
-        doc_lines.append(f"  * {prop_name} ({is_req}): {prop_desc}")
-
-    full_doc = "\n".join(doc_lines)
-
-    # 4. Async wrapper function
     async def wrapper(*args: Any, **kwargs: Any) -> str:
-        # Step A: Signature binding (positional / keyword)
-        try:
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-            arguments = bound.arguments
-        except TypeError as sig_err:
-            logger.warning(
-                f"Signature binding failed for tool '{tool_name}': {sig_err}"
-            )
-            return f"Observation: Invalid arguments for tool '{tool_name}': {sig_err}"
+        bound = sig.bind(*args, **kwargs)
 
-        # Step B: Pre-flight local Pydantic validation (Fast Fail)
-        try:
-            validated_instance = model(**arguments)
-            clean_kwargs = validated_instance.model_dump(exclude_unset=False)
-        except pydantic.ValidationError as val_err:
-            logger.warning(
-                f"Pydantic validation failed for tool '{tool_name}': {val_err}"
-            )
-            return (
-                f"Observation: Parameter validation failed for tool '{tool_name}':\n"
-                f"{val_err}"
-            )
+        mcp_arguments: dict[str, Any] = {}
+        for clean_name, val in bound.arguments.items():
+            if val is not None:
+                orig_name = alias_map.get(clean_name, clean_name)
+                mcp_arguments[orig_name] = val
 
-        # Step C: Execute RPC call via MCP client
-        return await call_tool_fn(tool_name, clean_kwargs)
+        return await client.call_tool(tool_def.name, mcp_arguments)
 
-    wrapper.__name__ = tool_name
-    wrapper.__doc__ = full_doc
+    wrapper.__name__ = sanitize_param_name(tool_def.name)
+    wrapper.__doc__ = tool_def.description or f"MCP tool '{tool_def.name}'"
     wrapper.__signature__ = sig  # type: ignore[attr-defined]
 
     return wrapper

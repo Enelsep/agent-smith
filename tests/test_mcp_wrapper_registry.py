@@ -1,5 +1,5 @@
 """
-Unit tests for MCP-2: Dynamic Tool Wrappers and Registry.
+Unit tests for MCP-2: Dynamic Tool Wrappers, Registry, and PR #17 fixes.
 """
 
 import inspect
@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 from agent_smith.mcp.protocol import MCPClientProtocol, MCPToolDefinition
 from agent_smith.mcp.registry import MCPToolRegistry
-from agent_smith.mcp.wrapper import create_tool_wrapper, json_schema_to_pydantic_model
+from agent_smith.mcp.wrapper import build_inspect_signature, build_mcp_tool_wrapper
 
 
 class DummyMCPClient(MCPClientProtocol):
@@ -58,96 +58,45 @@ class DummyMCPClient(MCPClientProtocol):
 
 
 class TestMCPWrapperAndRegistry(unittest.IsolatedAsyncioTestCase):
-    async def test_pydantic_schema_generation(self) -> None:
+    async def test_inspect_signature_building(self) -> None:
         schema = {
             "type": "object",
             "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"},
-                "tags": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["name"],
-        }
-        Model = json_schema_to_pydantic_model("TestModel", schema)
-        instance = Model(name="Bob", age=30, tags=["admin", "user"])
-        data = instance.model_dump()
-        self.assertEqual(data["name"], "Bob")
-        self.assertEqual(data["age"], 30)
-
-    async def test_inspect_signature_and_docstrings(self) -> None:
-        async def dummy_call(name: str, args: dict[str, Any]) -> str:
-            return "ok"
-
-        schema = {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The path"},
-                "count": {"type": "integer", "description": "The count"},
+                "path": {"type": "string"},
+                "count": {"type": "integer"},
             },
             "required": ["path"],
         }
-
-        wrapper = create_tool_wrapper(
-            tool_name="test_tool",
-            description="Test tool",
-            input_schema=schema,
-            call_tool_fn=dummy_call,
-        )
-
-        sig = inspect.signature(wrapper)
+        sig, _alias_map = build_inspect_signature(schema)
         self.assertIn("path", sig.parameters)
         self.assertIn("count", sig.parameters)
-        self.assertEqual(sig.parameters["path"].annotation, str)
-        self.assertEqual(sig.parameters["count"].default, None)
-        doc = wrapper.__doc__
-        self.assertIsNotNone(doc)
-        assert doc is not None
-        self.assertIn("Parameters:", doc)
-
-    async def test_fast_fail_validation_error(self) -> None:
-        mock_call = AsyncMock()
-
-        schema = {
-            "type": "object",
-            "properties": {"line_number": {"type": "integer"}},
-            "required": ["line_number"],
-        }
-
-        wrapper = create_tool_wrapper(
-            tool_name="num_tool",
-            description="Numeric tool",
-            input_schema=schema,
-            call_tool_fn=mock_call,
-        )
-        res_missing = await wrapper()
-        self.assertIn("Observation: Invalid arguments", res_missing)
-        mock_call.assert_not_called()
-        res_bad_type = await wrapper(line_number="not_a_number")
-        self.assertIn("Observation: Parameter validation failed", res_bad_type)
-        mock_call.assert_not_called()
+        self.assertEqual(sig.parameters["path"].default, inspect.Parameter.empty)
+        self.assertIsNone(sig.parameters["count"].default)
 
     async def test_successful_tool_execution(self) -> None:
-        mock_call = AsyncMock(return_value="File updated successfully")
+        mock_client = AsyncMock(spec=MCPClientProtocol)
+        mock_client.call_tool.return_value = "File updated successfully"
 
-        schema = {
-            "type": "object",
-            "properties": {
-                "filepath": {"type": "string"},
-                "line": {"type": "integer"},
-            },
-            "required": ["filepath"],
-        }
-
-        wrapper = create_tool_wrapper(
-            tool_name="edit",
+        tool_def = MCPToolDefinition(
+            name="edit",
             description="Editor",
-            input_schema=schema,
-            call_tool_fn=mock_call,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string"},
+                    "line": {"type": "integer"},
+                },
+                "required": ["filepath"],
+            },
         )
 
+        wrapper = build_mcp_tool_wrapper(mock_client, tool_def)
         result = await wrapper("main.py", line=10)
+
         self.assertEqual(result, "File updated successfully")
-        mock_call.assert_called_once_with("edit", {"filepath": "main.py", "line": 10})
+        mock_client.call_tool.assert_called_once_with(
+            "edit", {"filepath": "main.py", "line": 10}
+        )
 
     async def test_registry_discovery_and_invocation(self) -> None:
         client = DummyMCPClient()
@@ -164,6 +113,72 @@ class TestMCPWrapperAndRegistry(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("app.py", edit_res)
         self.assertEqual(len(client.call_history), 2)
+
+
+class TestPR17Fixes(unittest.IsolatedAsyncioTestCase):
+    async def test_issue_1_per_tool_isolation(self) -> None:
+        client = AsyncMock(spec=MCPClientProtocol)
+        good1 = MCPToolDefinition(name="good1", description="1", input_schema={})
+        bad = MCPToolDefinition(
+            name="bad", description="2", input_schema={"properties": "not-a-dict"}
+        )
+        good2 = MCPToolDefinition(name="good2", description="3", input_schema={})
+
+        client.list_tools.return_value = [good1, bad, good2]
+        registry = MCPToolRegistry(client)
+
+        await registry.discover_tools()
+
+        self.assertIn("good1", registry.tools)
+        self.assertIn("good2", registry.tools)
+        self.assertNotIn("bad", registry.tools)
+
+    async def test_issue_2_kebab_case_param(self) -> None:
+        client = AsyncMock(spec=MCPClientProtocol)
+        client.call_tool.return_value = "ok"
+
+        tool_def = MCPToolDefinition(
+            name="read-file",
+            description="read",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "start-line": {"type": "integer"},
+                    "from": {"type": "string"},
+                },
+                "required": ["start-line"],
+            },
+        )
+
+        wrapper = build_mcp_tool_wrapper(client, tool_def)
+        res = await wrapper(start_line=10, from_="source")
+
+        self.assertEqual(res, "ok")
+        client.call_tool.assert_called_once_with(
+            "read-file", {"start-line": 10, "from": "source"}
+        )
+
+    async def test_issue_3_omitted_optional_args_not_sent_as_null(self) -> None:
+        client = AsyncMock(spec=MCPClientProtocol)
+        client.call_tool.return_value = "ok"
+
+        tool_def = MCPToolDefinition(
+            name="edit",
+            description="edit",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string"},
+                    "optional_param": {"type": "integer"},
+                },
+                "required": ["filepath"],
+            },
+        )
+
+        wrapper = build_mcp_tool_wrapper(client, tool_def)
+        await wrapper(filepath="main.py")
+
+        client.call_tool.assert_called_once_with("edit", {"filepath": "main.py"})
 
 
 if __name__ == "__main__":
