@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from agent_smith.sandbox.process import Sandbox
 from agent_smith.sandbox.protocol import Outcome
 
@@ -68,14 +70,25 @@ def test_hard_timeout_restarts_reports_duration_and_loses_namespace() -> None:
         assert "NameError" in lost.error
 
 
-def test_worker_crash_reports_crashed_not_timeout() -> None:
+def test_worker_crash_reports_crashed_not_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The security layer blocks the imports that could kill the worker from
+    # user code, so we simulate the worker dying after send() but before it
+    # replies: recv() then hits EOF, which must read as CRASHED, not a timeout.
     with Sandbox(timeout=2.0) as sb:
-        sb.execute("x = 1")
-        r = sb.execute("import os\nos._exit(1)")
+        sb.execute("x = 1")  # spin up a live worker
+        assert sb._proc is not None and sb._proc.is_alive()
+
+        def _dead_pipe() -> object:
+            raise EOFError
+
+        monkeypatch.setattr(sb._conn, "recv", _dead_pipe)
+        r = sb.execute("x = 2")
         # A dead worker must be distinguished from a hung one.
         assert r.outcome is Outcome.CRASHED
         assert sb.restarts == 1
-        # The sandbox recovers and is usable again.
+        # restart() swapped in a fresh connection, so the sandbox works again.
         assert sb.execute("print('alive')").outcome is Outcome.OK
 
 
