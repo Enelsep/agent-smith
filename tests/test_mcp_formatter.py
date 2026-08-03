@@ -79,6 +79,18 @@ class TestMCPFormatter(unittest.TestCase):
         prompt_str = to_react_prompt_string([])
         self.assertEqual(prompt_str, "No tools available.")
 
+    def test_to_openai_tool_empty_schema(self) -> None:
+        """Test that an empty input schema gets normalized for OpenAI."""
+        tool_empty = MCPToolDefinition(
+            name="ping",
+            description="Ping the agent",
+            input_schema={},
+        )
+        formatted = to_openai_tool(tool_empty)
+        # Verify the normalization occurred
+        self.assertEqual(formatted["function"]["parameters"]["type"], "object")
+        self.assertEqual(formatted["function"]["parameters"]["properties"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
