@@ -7,6 +7,7 @@ try/except boundary in loop.py.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from agent_smith.llm import Message
@@ -173,7 +174,7 @@ def can_afford_forced_call(
     Measured against the ceiling itself, not the margin: this is the last
     call, so there is nothing further to hold room for.
     """
-    forced_call = ratio * (estimated_next_input + NUDGE_TOKENS)
+    forced_call = math.ceil(ratio * (estimated_next_input + NUDGE_TOKENS + 1))
     return total_input_tokens + forced_call <= max_input_tokens
 
 
@@ -225,8 +226,15 @@ def should_force_submission(
     is reserved at `estimated_next_input + estimated_growth`, plus the
     nudge that will be appended to it.
     """
-    authorised_call = ratio * estimated_next_input
-    forced_call = ratio * (estimated_next_input + estimated_growth + NUDGE_TOKENS)
+    # Rounded up, so a cost is never carried as less than a whole token.
+    # Not for float precision — the error there is ~1e-12 against a margin
+    # of hundreds — but because `estimate_tokens` floors a summed character
+    # count, so the view and the nudge estimated apart can come to one token
+    # less than the request they are actually sent as.
+    authorised_call = math.ceil(ratio * estimated_next_input)
+    forced_call = math.ceil(
+        ratio * (estimated_next_input + estimated_growth + NUDGE_TOKENS + 1)
+    )
     if total_input_tokens + authorised_call + forced_call > max_input_tokens * (
         1 - input_margin
     ):
