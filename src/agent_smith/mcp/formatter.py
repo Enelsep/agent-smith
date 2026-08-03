@@ -24,12 +24,18 @@ def to_openai_tool(tool_def: MCPToolDefinition) -> dict[str, Any]:
     Returns:
         dict formatted according to OpenAI API tool specification.
     """
+    # Normalisation : OpenAI rejette les paramètres vides {}.
+    # On force un schéma d'objet vide valide si aucun paramètre n'est fourni.
+    parameters = tool_def.input_schema
+    if not parameters:
+        parameters = {"type": "object", "properties": {}}
+
     return {
         "type": "function",
         "function": {
             "name": tool_def.name,
             "description": tool_def.description,
-            "parameters": tool_def.input_schema,
+            "parameters": parameters,
         },
     }
 
