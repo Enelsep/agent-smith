@@ -65,11 +65,32 @@ stay under the ceiling. Real transcripts here reach 1 300–2 800 tokens per req
 counting overshoots on most of them. Counting the request twice reserves the forced call explicitly
 and the bound becomes `final ≤ 0.85·C`, with the margin absorbing the estimate's own error.
 
-That error runs the opposite way to intuition: chars/4 is **optimistic**, not slack. It is the ratio
-for prose, code tokenises nearer 3 chars per token, and it ignores the per-message chat-template
-overhead the endpoint bills into `prompt_tokens`. Sizing a buffer as if the estimate were
-conservative would put the guard on the wrong side of the ceiling exactly when the transcript is
-longest.
+**Why the estimator stays at chars/4.** It is the prose ratio; code tokenises nearer 3 chars per
+token, so the estimate is optimistic on exactly the content this agent sends. The obvious response —
+divide by 3 and be conservative — is worth less than it looks, because the reservation *scales with
+the estimate*: the same bias applies to the call being authorised and to the forced call held in
+reserve, where it largely cancels. Measured against endpoints billing at 4.0, 3.5 and 3.0 chars per
+token, on a 6 000-token ceiling:
+
+| Estimator | billed at 4.0 | billed at 3.5 | billed at 3.0 |
+|---|---|---|---|
+| chars/4 | 5 iterations, 4 845 spent | 5, 5 537 | 4, 4 364 |
+| chars/3 | 4 iterations, 3 272 spent | 4, 3 740 | 4, 4 364 |
+
+Neither overshoots. Dividing by 3 costs an iteration in two cases of three and leaves up to 45% of
+the budget unspent. The plan's own tie-break settles it — *"treat 5/5 with low iteration counts as
+the real target, not 4/5 anyhow"* — so an available iteration is worth more than unused headroom.
+What the estimator must never be read as is a conservative upper bound; the margin, not the
+constant, is what stands between it and the ceiling.
+
+**Where that stops being true.** The reservation absorbs proportional error, not unbounded error.
+Sweeping the billed ratio on the same 6 000-token ceiling, the run finishes under budget down to
+2.5 chars per token and crosses it at 2.0. Real code tokenises at 3.0–3.5, so the working range
+covers the benchmarks with room to spare, but the limit is a property of the estimate rather than of
+the guard: content that tokenises at 2 chars each — dense punctuation, base64, non-Latin script —
+would defeat any fixed divisor. `tests/test_agent_loop.py` pins the holding range at 1.0, 1.33 and
+1.6× the estimate; if a future benchmark carries that kind of content, calibration (see Deferred)
+becomes the answer rather than a different constant.
 
 **Why the output reserve is derived, not constant.** What has to fit is one `final_answer(...)`, and
 how big that is depends on the benchmark: MBPP submits a function (80–250 tokens), SWE-bench submits
@@ -309,8 +330,19 @@ Same pattern CORE-1 through CORE-4 established: scripted doubles, no I/O, exhaus
 
 - **The exact wording of `FORCED_SUBMISSION_NUDGE`.** `CORE-6` owns prompt content for both
   benchmarks; this card ships a placeholder string and the seam, not the final text.
-- **A real tokenizer.** `estimate_tokens` stays a chars/4 heuristic; swapping in a model-specific
-  tokenizer, if ever justified, is a change inside this one function.
+- **A real tokenizer.** Rejected rather than postponed. `tiktoken` encodes for OpenAI models, while
+  we run Llama, Qwen and Mistral on Groq and OpenRouter — precision against the wrong vocabulary. It
+  also fetches its BPE files over the network on first use, which would contradict the README's
+  statement that our only outbound HTTP is the inference call and trip
+  `tests/test_llm_import_boundary.py`. A per-model tokenizer from `transformers` would need each
+  model's vocabulary files, for an accuracy the reservation already makes cheap to do without.
+- **Calibrating the estimate from observed usage.** Strictly better than any constant and free of
+  dependencies: after each call both `estimate_tokens(view)` and the billed `answer.input_tokens` are
+  known for the same view, so the real chars-per-token ratio can be measured per model and endpoint
+  from the first iteration onward. Deferred because the reservation already keeps every measured
+  configuration under budget, and `CORE-7` is about to change the shape of the views being
+  estimated — calibrating against an estimator that is about to be re-based would be premature.
+  Worth revisiting once compaction has settled.
 - **Passing the remaining wall clock down to `CORE-2`.** `RetryingProvider` bounds each `complete()`
   with its own `max_elapsed_seconds`, restarted per call, and its docstring anticipates this card
   supplying a smaller value derived from what is left of the task. It does not: `LLMProvider.complete()`

@@ -12,16 +12,26 @@ from collections.abc import Sequence
 from agent_smith.llm import Message
 
 CHARS_PER_TOKEN = 4
+"""Divisor behind `estimate_tokens`.
+
+Deliberately the prose ratio, not the denser one code really tokenises at.
+A guard wants conservative estimates, so the tempting move is to divide by
+3 — but the reservation in `should_force_submission` scales with the
+estimate, applying the same bias to the call being authorised and to the
+forced call it holds room for, where it largely cancels. Measured against
+endpoints billing at 4.0, 3.5 and 3.0 chars per token, dividing by 3
+overshoots nothing that dividing by 4 overshoots either, and costs an
+iteration in two of the three while leaving up to 45% of the budget
+unspent. The extra iteration is worth more than the unused headroom.
+"""
 
 DEFAULT_INPUT_MARGIN = 0.15
 """Fraction of the input ceiling held back on top of the reserved call.
 
-`should_force_submission` reserves the forced request explicitly, by
-counting the next request twice. This margin covers what that reservation
-cannot: `estimate_tokens` is optimistic rather than slack — chars/4 is the
-ratio for prose, code tokenises nearer 3 chars per token, and the estimate
-ignores the per-message chat-template overhead the endpoint bills into
-`prompt_tokens` — so the reserved call costs more than it was reserved at.
+The reservation covers the forced request; this covers what scales with
+neither — the per-message chat-template overhead the endpoint bills into
+`prompt_tokens`, the nudge appended after the estimate was taken, and
+variance between one request and the next.
 """
 
 DEFAULT_WALL_CLOCK_MARGIN = 0.15
@@ -83,9 +93,9 @@ def estimate_tokens(messages: Sequence[Message]) -> int:
     """Approximate the token count of a message list as len(chars) / 4.
 
     A heuristic, not a tokenizer: no dependency, and no assumption about
-    which model's vocabulary applies. It is biased *low* — see
-    `DEFAULT_INPUT_MARGIN`, which is sized to cover that bias — so it
-    must never be read as a conservative upper bound.
+    which model's vocabulary applies. It is biased *low* on code — see
+    `CHARS_PER_TOKEN` for why that is the right trade here — so it must
+    never be read as a conservative upper bound.
     """
     total_chars = sum(len(message["content"]) for message in messages)
     return total_chars // CHARS_PER_TOKEN

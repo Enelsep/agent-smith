@@ -656,12 +656,17 @@ class BillingProvider:
         )
 
 
-@pytest.mark.parametrize("ratio", [1.0, 1.33])
+@pytest.mark.parametrize("ratio", [1.0, 1.33, 1.6])
 def test_a_forced_run_finishes_under_the_input_ceiling(ratio: float) -> None:
     # The property the guard exists for. It holds because the guard
     # reserves the forced call before authorising the one in front of it;
-    # counting that request once instead of twice overshoots here, at both
-    # ratios, which is what makes this test worth running.
+    # counting that request once instead of twice overshoots here, at every
+    # ratio, which is what makes this test worth running.
+    #
+    # 1.0 is an endpoint billing exactly what chars/4 predicts, 1.33 is
+    # real code at 3 chars per token, and 1.6 is 2.5 — denser than any of
+    # these benchmarks produces. The guard stops holding around 2.0, which
+    # is the documented limit of the estimate, not a defect in the guard.
     provider = BillingProvider(ratio=ratio)
     sandbox = FakeSandbox([ok("o" * 400 + "\n")] * 30)
 
