@@ -1,88 +1,88 @@
 """
-Unit tests for MCP-3 Sandbox Integration.
+Unit tests for MCP-3 Sandbox Integration (IPC Model).
 """
 
-import inspect
 import unittest
-from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from agent_smith.mcp.protocol import MCPClientProtocol, MCPToolDefinition
+from agent_smith.mcp.protocol import MCPToolDefinition
 from agent_smith.mcp.registry import MCPToolRegistry
 from agent_smith.mcp.sandbox_integration import (
-    get_sync_tools,
-    inject_tools_into_namespace,
-    make_sync_tool,
+    create_tool_stub,
+    execute_mcp_tool_call,
+    get_sandbox_tool_stubs,
 )
 
 
-class DummyMCPClient(MCPClientProtocol):
-    async def connect(self) -> None:
-        pass
-
-    async def disconnect(self) -> None:
-        pass
-
-    async def list_tools(self) -> list[MCPToolDefinition]:
-        return [
-            MCPToolDefinition(
-                name="read_file",
-                description="Read file content",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "filepath": {"type": "string", "description": "Target path"}
-                    },
-                    "required": ["filepath"],
-                },
-            )
-        ]
-
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        return f"Content of {arguments.get('filepath')}"
-
-
 class TestMCPSandboxIntegration(unittest.IsolatedAsyncioTestCase):
-    async def test_make_sync_tool_execution(self) -> None:
-        async_mock = AsyncMock(return_value="mocked output")
-        async_mock.__name__ = "dummy_tool"
-        async_mock.__doc__ = "Dummy docstring"
+    def setUp(self) -> None:
+        self.tool_def = MCPToolDefinition(
+            name="test_tool",
+            description="A test tool for sandbox",
+            input_schema={"type": "object", "properties": {}},
+        )
 
-        sync_tool = make_sync_tool(async_mock)
+    def test_create_tool_stub(self) -> None:
+        # Mock the IPC request function that would normally send data over a pipe
+        mock_ipc = MagicMock(return_value="ipc_success_result")
+        stub = create_tool_stub(self.tool_def, mock_ipc)
 
-        self.assertEqual(sync_tool.__name__, "dummy_tool")
-        self.assertEqual(sync_tool.__doc__, "Dummy docstring")
+        # Verify metadata is preserved
+        self.assertEqual(stub.__name__, "test_tool")
+        self.assertEqual(stub.__doc__, "A test tool for sandbox")
 
-        # Execute synchronously
-        result = sync_tool()
-        self.assertEqual(result, "mocked output")
+        # Execute the stub as if called by the sandboxed worker
+        result = stub(target_file="app.py", limit=10)
+        self.assertEqual(result, "ipc_success_result")
+        mock_ipc.assert_called_once_with(
+            "test_tool", {"target_file": "app.py", "limit": 10}
+        )
 
-    async def test_get_sync_tools_and_namespace_injection(self) -> None:
-        client = DummyMCPClient()
-        registry = MCPToolRegistry(client)
-        await registry.discover_tools()
+    def test_get_sandbox_tool_stubs(self) -> None:
+        mock_ipc = MagicMock()
+        stubs = get_sandbox_tool_stubs([self.tool_def], mock_ipc)
 
-        sync_tools = get_sync_tools(registry)
-        self.assertIn("read_file", sync_tools)
+        self.assertIn("test_tool", stubs)
+        self.assertTrue(callable(stubs["test_tool"]))
 
-        # Introspect signature
-        sig = inspect.signature(sync_tools["read_file"])
-        self.assertIn("filepath", sig.parameters)
+    async def test_execute_mcp_tool_call_success(self) -> None:
+        mock_registry = MagicMock(spec=MCPToolRegistry)
+        mock_tool_wrapper = AsyncMock(return_value="tool_executed_correctly")
+        mock_registry.tools = {"test_tool": mock_tool_wrapper}
 
-        # Call synchronous tool
-        res = sync_tools["read_file"](filepath="test.txt")
-        self.assertEqual(res, "Content of test.txt")
+        # Parent process receives IPC request and executes it
+        result = await execute_mcp_tool_call(
+            mock_registry, "test_tool", {"arg1": "value1"}
+        )
 
-        # Inject into execution namespace and execute via exec()
-        namespace: dict[str, Any] = {}
-        inject_tools_into_namespace(namespace, registry)
+        self.assertEqual(result, "tool_executed_correctly")
+        mock_tool_wrapper.assert_called_once_with(arg1="value1")
 
-        self.assertIn("read_file", namespace)
+    async def test_execute_mcp_tool_call_not_found(self) -> None:
+        mock_registry = MagicMock(spec=MCPToolRegistry)
+        mock_registry.tools = {}
 
-        # Simulate exec() as performed in worker.py
-        code = "output = read_file(filepath='hello.py')"
-        exec(code, namespace)  # noqa: S102
-        self.assertEqual(namespace["output"], "Content of hello.py")
+        result = await execute_mcp_tool_call(mock_registry, "unknown_tool", {})
+        self.assertIn("not found in registry", result)
+
+    async def test_execute_mcp_tool_call_type_error(self) -> None:
+        # Simulates the agent providing the wrong parameters
+        mock_registry = MagicMock(spec=MCPToolRegistry)
+        mock_tool_wrapper = AsyncMock(
+            side_effect=TypeError("missing 1 required argument")
+        )
+        mock_registry.tools = {"test_tool": mock_tool_wrapper}
+
+        result = await execute_mcp_tool_call(mock_registry, "test_tool", {})
+        self.assertIn("Invalid arguments", result)
+
+    async def test_execute_mcp_tool_call_general_error(self) -> None:
+        mock_registry = MagicMock(spec=MCPToolRegistry)
+        mock_tool_wrapper = AsyncMock(side_effect=RuntimeError("connection lost"))
+        mock_registry.tools = {"test_tool": mock_tool_wrapper}
+
+        result = await execute_mcp_tool_call(mock_registry, "test_tool", {})
+        self.assertIn("Tool execution failed", result)
 
 
 if __name__ == "__main__":
