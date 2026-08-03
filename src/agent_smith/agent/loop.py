@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 from agent_smith.agent import observation
 from agent_smith.agent.budget import (
     FORCED_SUBMISSION_NUDGE,
+    can_attempt_submission,
     capped_max_tokens,
     estimate_tokens,
     remaining_output_tokens,
@@ -77,6 +78,7 @@ def run_task(
     max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     max_wall_clock_seconds: float = DEFAULT_MAX_WALL_CLOCK_SECONDS,
+    max_tokens_per_call: int | None = None,
 ) -> SolutionOutput:
     """Run one task to a `SolutionOutput`. Never raises.
 
@@ -86,6 +88,12 @@ def run_task(
     The sandbox is driven here but built and disposed of by the caller: that is
     what lets a fake satisfy it, and it puts the `finally` that must survive a
     signal at the process entry point rather than inside a library.
+
+    `max_tokens_per_call` is the per-request ceiling the operator configured —
+    `ResolvedConfig.max_tokens`, from `models.json`. The loop lowers it as the
+    cumulative output budget drains but never raises it, so a model configured
+    to answer in 400 tokens is not handed 1 500 on the first step. `None`
+    leaves the provider's own default in force.
     """
     run = _Run(task, clock)
     try:
@@ -97,6 +105,7 @@ def run_task(
             max_input_tokens,
             max_output_tokens,
             max_wall_clock_seconds,
+            max_tokens_per_call,
         )
         return run.to_solution()
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
@@ -135,6 +144,7 @@ class _Run:
         max_input_tokens: int,
         max_output_tokens: int,
         max_wall_clock_seconds: float,
+        max_tokens_per_call: int | None,
     ) -> None:
         """Turn the loop until an answer arrives, the budget runs out, or the
         iterations run out."""
@@ -152,14 +162,23 @@ class _Run:
                 remaining_output_tokens=remaining_output,
             )
             if reason is not None:
-                self.history.append(
-                    {"role": "user", "content": FORCED_SUBMISSION_NUDGE}
-                )
-                view = compact(self.history)
+                if not can_attempt_submission(remaining_output):
+                    self.error = (
+                        f"stopped by the {reason} budget guard before step "
+                        f"{step}: {remaining_output} output tokens remained, "
+                        "too few to attempt a final answer"
+                    )
+                    return
+                # Added to the view, not to the transcript. The forced
+                # iteration is the last one, so nothing reads this message
+                # back, and it keeps `compact` to one call per iteration:
+                # CORE-7 need not be idempotent, nor preserve the last
+                # message it is handed.
+                view = [*view, {"role": "user", "content": FORCED_SUBMISSION_NUDGE}]
             try:
                 answer = provider.complete(
                     view,
-                    max_tokens=capped_max_tokens(None, remaining_output),
+                    max_tokens=capped_max_tokens(max_tokens_per_call, remaining_output),
                 )
             except ProviderError as refused:
                 # CORE-2 has already retried across the key pool and spent its

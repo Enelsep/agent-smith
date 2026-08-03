@@ -622,6 +622,158 @@ def test_a_forced_submission_attempt_can_still_succeed() -> None:
     }
 
 
+def test_a_forced_run_finishes_under_the_input_ceiling() -> None:
+    # The guard trips while one more round trip still fits, so the
+    # submission it forces lands inside the ceiling. An over-budget run is
+    # scored as a failure whatever it answered.
+    provider = FakeProvider(
+        [
+            a_response(input_tokens=5200, output_tokens=5),
+            a_response(input_tokens=300, output_tokens=5),
+        ]
+    )
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+    )
+
+    assert solution.success is True
+    assert solution.total_input_tokens <= 6000
+
+
+def test_an_exhausted_output_budget_never_reaches_the_provider() -> None:
+    # A step can drain the budget from above the reserve to near zero in
+    # one completion. What is left cannot carry a final_answer(), so the
+    # run ends rather than spending a request on it.
+    provider = FakeProvider([a_response(output_tokens=1495), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_output_tokens=1500
+    )
+
+    assert provider.max_tokens_calls == [1500]
+    assert solution.success is False
+    assert solution.error is not None
+    assert "output_tokens" in solution.error
+
+
+def test_a_ceiling_below_the_viable_floor_spends_no_request_at_all() -> None:
+    provider = FakeProvider([a_response()])
+    sandbox = FakeSandbox([])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_output_tokens=10
+    )
+
+    assert provider.max_tokens_calls == []
+    assert solution.iterations == 0
+    assert solution.error is not None
+    assert "output_tokens" in solution.error
+
+
+def test_the_output_reserve_still_leaves_room_to_answer() -> None:
+    # Below the reserve but above the viable floor: the forced attempt is
+    # made, and it gets the tokens the reserve held back.
+    provider = FakeProvider([a_response(output_tokens=1250), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_output_tokens=1500
+    )
+
+    assert provider.max_tokens_calls == [1500, 250]
+    assert solution.success is True
+
+
+def test_a_forced_iteration_whose_extraction_fails_still_ends_the_run() -> None:
+    # The other half of the branch: the run must stop after the forced
+    # iteration whether or not the reply contained code.
+    provider = FakeProvider([a_response(input_tokens=5200), failed_extraction()])
+    sandbox = FakeSandbox([ok("not done yet\n")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+    )
+
+    assert solution.success is False
+    assert solution.iterations == 2
+    assert solution.error is not None
+    assert "input_tokens" in solution.error
+    assert solution.steps[1].sandbox_input == ""
+
+
+def test_the_configured_per_call_ceiling_is_never_exceeded() -> None:
+    # ResolvedConfig.max_tokens, from models.json. The loop lowers it as
+    # the cumulative budget drains but must never raise it.
+    provider = FakeProvider(
+        [
+            a_response(output_tokens=100),
+            a_response(output_tokens=100),
+            a_response(),
+        ]
+    )
+    sandbox = FakeSandbox([ok("a\n"), ok("b\n"), answered("done")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_output_tokens=1500,
+        max_tokens_per_call=400,
+    )
+
+    assert provider.max_tokens_calls == [400, 400, 400]
+
+
+def test_the_nudge_survives_a_compaction_that_drops_the_tail() -> None:
+    # CORE-7 may summarise the transcript into a head window, or into a
+    # single message. The nudge is added to the view after compaction, so
+    # a forced attempt stays forced whatever compaction does.
+    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        compact=lambda messages: messages[:1],
+        max_input_tokens=6000,
+    )
+
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": budget.FORCED_SUBMISSION_NUDGE,
+    }
+
+
+def test_compaction_runs_once_per_iteration_even_when_forced() -> None:
+    # CORE-7 is free to be expensive — it may summarise with an LLM call.
+    # Estimating the request must not cost it a second invocation.
+    seen: list[int] = []
+
+    def counting(messages: list[Message]) -> list[Message]:
+        seen.append(len(messages))
+        return messages
+
+    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        compact=counting,
+        max_input_tokens=6000,
+    )
+
+    assert len(seen) == 2
+
+
 def test_the_output_budget_shrinks_the_max_tokens_requested_each_call() -> None:
     provider = FakeProvider(
         [

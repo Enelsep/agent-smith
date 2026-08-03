@@ -1,20 +1,24 @@
 """Pure functions deciding when the next LLM call would blow the task budget."""
 
 from agent_smith.agent.budget import (
+    MIN_VIABLE_OUTPUT_TOKENS,
+    RESERVED_OUTPUT_TOKENS,
+    can_attempt_submission,
     capped_max_tokens,
-    remaining_output_tokens,
     estimate_tokens,
+    remaining_output_tokens,
     should_force_submission,
 )
+from agent_smith.llm import Message
 
 
 def test_estimate_tokens_uses_a_four_chars_per_token_ratio() -> None:
-    messages = [{"role": "user", "content": "a" * 40}]
+    messages: list[Message] = [{"role": "user", "content": "a" * 40}]
     assert estimate_tokens(messages) == 10
 
 
 def test_estimate_tokens_sums_every_message_in_the_list() -> None:
-    messages = [
+    messages: list[Message] = [
         {"role": "system", "content": "a" * 20},
         {"role": "user", "content": "a" * 20},
     ]
@@ -39,74 +43,89 @@ def test_capped_max_tokens_returns_the_smaller_of_the_two() -> None:
     assert capped_max_tokens(default=200, remaining=300) == 200
 
 
-def test_should_force_submission_trips_on_input_tokens() -> None:
-    reason = should_force_submission(
-        total_input_tokens=5900,
-        estimated_next_input=200,
-        max_input_tokens=6000,
-        elapsed_seconds=0.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=100,
+def test_a_submission_is_worth_attempting_from_the_viable_floor_up() -> None:
+    assert can_attempt_submission(MIN_VIABLE_OUTPUT_TOKENS) is True
+    assert can_attempt_submission(MIN_VIABLE_OUTPUT_TOKENS - 1) is False
+
+
+def test_an_exhausted_output_budget_is_never_worth_a_request() -> None:
+    # The case that would otherwise send max_tokens=0, which most
+    # OpenAI-compatible endpoints reject outright.
+    assert can_attempt_submission(0) is False
+
+
+def force_reason(
+    *,
+    total_input_tokens: int = 100,
+    estimated_next_input: int = 100,
+    max_input_tokens: int = 6000,
+    elapsed_seconds: float = 10.0,
+    max_wall_clock_seconds: float = 120.0,
+    remaining_output_tokens: int = 1000,
+) -> str | None:
+    """`should_force_submission` with every ceiling healthy by default, so
+    each test names only the one it breaches."""
+    return should_force_submission(
+        total_input_tokens=total_input_tokens,
+        estimated_next_input=estimated_next_input,
+        max_input_tokens=max_input_tokens,
+        elapsed_seconds=elapsed_seconds,
+        max_wall_clock_seconds=max_wall_clock_seconds,
+        remaining_output_tokens=remaining_output_tokens,
     )
-    assert reason == "input_tokens"
 
 
-def test_should_force_submission_trips_on_wall_clock_margin() -> None:
-    reason = should_force_submission(
-        total_input_tokens=0,
-        estimated_next_input=0,
-        max_input_tokens=6000,
-        elapsed_seconds=110.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=100,
+def test_nothing_is_forced_while_every_ceiling_is_far_off() -> None:
+    assert force_reason() is None
+
+
+def test_the_input_guard_trips_while_one_more_round_trip_still_fits() -> None:
+    # 5000 + 200 is under the 6000 ceiling but over the 15% margin, which
+    # is 5100 — and that is exactly when the run must submit. Tripping
+    # only once 6000 itself is projected would force the submission by
+    # making the very call that busts the budget.
+    assert 5000 + 200 < 6000
+    assert force_reason(total_input_tokens=5000, estimated_next_input=200) == (
+        "input_tokens"
     )
-    assert reason == "wall_clock"
 
 
-def test_should_force_submission_does_not_trip_just_under_the_wall_clock_margin() -> None:
-    reason = should_force_submission(
-        total_input_tokens=0,
-        estimated_next_input=0,
-        max_input_tokens=6000,
-        elapsed_seconds=100.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=100,
+def test_the_input_guard_leaves_room_below_its_margin() -> None:
+    assert force_reason(total_input_tokens=4000, estimated_next_input=200) is None
+
+
+def test_the_wall_clock_guard_trips_past_its_margin() -> None:
+    assert force_reason(elapsed_seconds=110.0) == "wall_clock"
+
+
+def test_the_wall_clock_guard_allows_exactly_its_margin() -> None:
+    # 0.85 * 120 is exactly 102, and the comparison is strict.
+    assert force_reason(elapsed_seconds=102.0) is None
+
+
+def test_the_output_guard_trips_below_the_reserve() -> None:
+    assert force_reason(remaining_output_tokens=RESERVED_OUTPUT_TOKENS - 1) == (
+        "output_tokens"
     )
-    assert reason is None
 
 
-def test_should_force_submission_trips_on_the_output_floor() -> None:
-    reason = should_force_submission(
-        total_input_tokens=0,
-        estimated_next_input=0,
-        max_input_tokens=6000,
-        elapsed_seconds=0.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=10,
+def test_the_output_guard_allows_exactly_the_reserve() -> None:
+    assert force_reason(remaining_output_tokens=RESERVED_OUTPUT_TOKENS) is None
+
+
+def test_input_tokens_are_reported_ahead_of_wall_clock() -> None:
+    # Both would trip on their own; input_tokens is checked first.
+    assert (
+        force_reason(
+            total_input_tokens=5000,
+            estimated_next_input=200,
+            elapsed_seconds=110.0,
+        )
+        == "input_tokens"
     )
-    assert reason == "output_tokens"
 
 
-def test_should_force_submission_returns_none_when_nothing_is_close() -> None:
-    reason = should_force_submission(
-        total_input_tokens=100,
-        estimated_next_input=100,
-        max_input_tokens=6000,
-        elapsed_seconds=10.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=100,
+def test_wall_clock_is_reported_ahead_of_output_tokens() -> None:
+    assert (
+        force_reason(elapsed_seconds=110.0, remaining_output_tokens=0) == "wall_clock"
     )
-    assert reason is None
-
-
-def test_should_force_submission_prioritises_input_tokens_over_wall_clock() -> None:
-    # Both would trip on their own; input_tokens is checked first and wins.
-    reason = should_force_submission(
-        total_input_tokens=5900,
-        estimated_next_input=200,
-        max_input_tokens=6000,
-        elapsed_seconds=110.0,
-        max_wall_clock_seconds=120.0,
-        remaining_output_tokens=100,
-    )
-    assert reason == "input_tokens"

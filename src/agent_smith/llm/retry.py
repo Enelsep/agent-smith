@@ -94,8 +94,16 @@ class RetryingProvider:
     `penalise()` is called on every failure so this class never has to ask it.
 
     `max_elapsed_seconds` restarts at each `complete()` call. It is a bound on
-    one completion, not on the task: CORE-5 owns the task's wall clock and will
-    pass a smaller value derived from what is left of it.
+    one completion, not on the task: CORE-5 owns the task's wall clock, and its
+    guard stops the loop once the elapsed time crosses a margin below the
+    ceiling.
+
+    That margin is what absorbs this class's budget, because nothing narrows
+    `max_elapsed_seconds` per call — `LLMProvider.complete()` has no deadline
+    parameter, so a caller cannot say how much of the task's clock is left
+    without changing the protocol every provider implements. Until one does,
+    a retry storm here is bounded by `max_elapsed_seconds` alone, and a long
+    enough one can still overrun the task ceiling CORE-5 guards.
     """
 
     def __init__(
