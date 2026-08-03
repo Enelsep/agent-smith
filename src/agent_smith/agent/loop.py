@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 from agent_smith.agent import observation
 from agent_smith.agent.budget import (
     FORCED_SUBMISSION_NUDGE,
+    UNCALIBRATED_BILLING_RATIO,
     billing_ratio,
     can_afford_forced_call,
     can_attempt_submission,
@@ -141,9 +142,22 @@ class _Run:
         # tokens the ceiling is denominated in, and to reserve the forced
         # call at the size the transcript will have reached by then. Both
         # are measured from the run itself rather than assumed.
-        self.total_estimated_input = 0
         self.largest_growth = 0
         self._last_estimate = 0
+        self._worst_ratio = 0.0
+
+    @property
+    def ratio(self) -> float:
+        """Billed tokens per estimated one, at the worst rate seen so far.
+
+        The largest observation rather than the average, because a ratio
+        that rises during the run would otherwise be met with a figure
+        that lags it, and lagging here means under-reserving. Falls back
+        to a pessimistic guess until a call has actually been billed;
+        `billing_ratio` floors every measurement at 1.0, so no real one
+        can be mistaken for that absent state.
+        """
+        return self._worst_ratio or UNCALIBRATED_BILLING_RATIO
 
     def execute(
         self,
@@ -173,9 +187,7 @@ class _Run:
                 total_input_tokens=self.total_input_tokens,
                 estimated_next_input=estimated,
                 estimated_growth=self.largest_growth or estimated,
-                ratio=billing_ratio(
-                    self.total_input_tokens, self.total_estimated_input
-                ),
+                ratio=self.ratio,
                 max_input_tokens=max_input_tokens,
                 elapsed_seconds=self._clock() - self._started,
                 max_wall_clock_seconds=max_wall_clock_seconds,
@@ -186,9 +198,7 @@ class _Run:
                 if not can_afford_forced_call(
                     total_input_tokens=self.total_input_tokens,
                     estimated_next_input=estimated,
-                    ratio=billing_ratio(
-                        self.total_input_tokens, self.total_estimated_input
-                    ),
+                    ratio=self.ratio,
                     max_input_tokens=max_input_tokens,
                 ):
                     self.error = (
@@ -225,10 +235,12 @@ class _Run:
                 # task's wall clock; the message is kept as it came.
                 self.error = str(refused)
                 return
-            # Paired with the billed count the response carries, this is
-            # what calibrates the ratio. Accumulated only once a call has
-            # actually been billed, so a refusal cannot deflate it.
-            self.total_estimated_input += estimated
+            # Calibration, from the one pairing that is never a guess: what
+            # this call was billed against what it was estimated at. Updated
+            # only once a call has been billed, so a refusal cannot deflate it.
+            self._worst_ratio = max(
+                self._worst_ratio, billing_ratio(answer.input_tokens, estimated)
+            )
             self.history.append({"role": "assistant", "content": answer.text})
             extracted = extract_code(answer.text, step=step)
             if extracted.code is None:

@@ -671,9 +671,12 @@ class BillingProvider:
 # The observation is deliberately substantial. With a one-line one the
 # transcript grows so slowly that the window between "forces at step 1"
 # and "does not force until step 3" is about 17 tokens wide, and any
-# reprompting would land outside it. At this size the window is ~350.
+# reprompting would land outside it. At this size the window is 1825-2200,
+# and the ceiling below sits near its centre rather than against an edge,
+# so CORE-6 rewording a prompt does not quietly move these tests onto a
+# different branch.
 FORCING_SYSTEM_PROMPT = "S" * 1200
-FORCING_INPUT_CEILING = 2100
+FORCING_INPUT_CEILING = 2000
 
 
 def forcing_task() -> TaskSpec:
@@ -684,17 +687,17 @@ def a_bulky_observation() -> ExecResult:
     return ok("o" * 400 + "\n")
 
 
-@pytest.mark.parametrize("ratio", [1.0, 1.33, 1.6])
+@pytest.mark.parametrize("ratio", [1.0, 1.33, 1.6, 2.5])
 def test_a_forced_run_finishes_under_the_input_ceiling(ratio: float) -> None:
-    # The property the guard exists for. It holds because the guard
-    # reserves the forced call before authorising the one in front of it;
-    # counting that request once instead of twice overshoots here, at every
-    # ratio, which is what makes this test worth running.
+    # The property the guard exists for. It holds because the forced call
+    # is reserved before the one in front of it is authorised, and both are
+    # priced in billed tokens rather than estimated ones.
     #
     # 1.0 is an endpoint billing exactly what chars/4 predicts, 1.33 is
-    # real code at 3 chars per token, and 1.6 is 2.5 — denser than any of
-    # these benchmarks produces. The guard stops holding around 2.0, which
-    # is the documented limit of the estimate, not a defect in the guard.
+    # real code at 3 chars per token, 1.6 is 2.5, and 2.5 is 1.6 — denser
+    # than these benchmarks produce. The divisor being wrong does not
+    # matter once a call has been billed: the ratio is measured, so the
+    # guard holds across the range rather than up to some limit.
     provider = BillingProvider(ratio=ratio)
     sandbox = FakeSandbox([ok("o" * 400 + "\n")] * 30)
 
@@ -728,6 +731,32 @@ def test_an_exhausted_output_budget_never_reaches_the_provider() -> None:
     assert solution.success is False
     assert solution.error is not None
     assert "output_tokens" in solution.error
+
+
+def test_a_forced_call_that_cannot_fit_is_never_made() -> None:
+    # The input backstop. A first prompt this large against this ceiling
+    # leaves no room for even one request, and a run that crosses the
+    # ceiling is scored a failure whatever it answers — so the request is
+    # not spent. Nothing is billed and nothing is recorded.
+    provider = BillingProvider()
+    sandbox = FakeSandbox([])
+
+    solution = run_task(
+        a_task(system_prompt="S" * 20000),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=6000,
+    )
+
+    assert provider.calls == []
+    assert solution.iterations == 0
+    assert solution.total_requests == 0
+    assert solution.total_input_tokens == 0
+    assert solution.success is False
+    assert solution.error is not None
+    assert "input_tokens" in solution.error
+    assert "6000" in solution.error
 
 
 def test_a_ceiling_below_the_viable_floor_spends_no_request_at_all() -> None:

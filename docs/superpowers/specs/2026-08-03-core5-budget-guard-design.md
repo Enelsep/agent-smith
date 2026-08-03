@@ -84,19 +84,36 @@ observations of 100–1 500, and endpoints billing between 4.0 and 1.6 chars per
 finishes under a 6 000-token ceiling, and the iterations reached degrade smoothly with density
 (3.9 at 4.0 chars/token, 3.3 at 3.0, 2.3 at 1.6) rather than the budget being blown.
 
-**A last check before the forced call.** Reserving ahead makes it rare, but an endpoint billing far
-above what the first uncalibrated call assumed can leave even the forced request unaffordable. It is
-then not made: `can_afford_forced_call` compares it against the ceiling itself, and a run that would
-cross the ceiling is scored a failure whatever it answers, so the request cannot help. This is the
-input counterpart of `can_attempt_submission`, and it is what makes the guarantee unconditional
-rather than contingent on the estimate being close.
+**A last check before the forced call.** Reserving ahead makes it rare, but a transcript can still
+reach a point where even the forced request will not fit. It is then not made:
+`can_afford_forced_call` compares it against the ceiling itself, and a run that would cross the
+ceiling is scored a failure whatever it answers, so the request cannot help. This is the input
+counterpart of `can_attempt_submission`.
+
+**Exactly how far the guarantee reaches.** It is worth being precise, because this is the property
+three review rounds were spent on:
+
+> The run finishes under the input ceiling **unconditionally once one call has been billed**. Before
+> that, it holds while the endpoint bills at most `UNCALIBRATED_BILLING_RATIO` (1.6) × the estimate.
+
+The exception is the first call and only the first call, because that is the one priced with a guess
+rather than a measurement. It bites only when the opening prompt is itself a large fraction of the
+whole cumulative ceiling *and* the endpoint bills denser than 2.5 chars per token — measured, a
+14 800-character system prompt against a 6 000-token ceiling finishes at 5 998 when the guess is
+right and overshoots when it is not. No MBPP or SWE-bench prompt comes close to that shape, and a
+first request that alone consumes the task's whole budget is not a case any guard can rescue.
 
 **Why the estimator's divisor barely matters now.** chars/4 is the prose ratio and under-counts code.
 That was worth arguing about while the guard compared estimates against a billed ceiling; once the
-conversion is measured, a wrong divisor is absorbed after the first call. What the estimate must
-never be read as is a billed figure. Content that tokenises far denser than any divisor predicts —
-dense punctuation, base64, non-Latin script — is handled by the same measurement rather than by
-picking a different constant.
+conversion is measured, a wrong divisor is absorbed from the second call onward. What the estimate
+must never be read as is a billed figure. Content that tokenises far denser than any divisor
+predicts — dense punctuation, base64, non-Latin script — is handled by that measurement rather than
+by picking a different constant.
+
+**The ratio is the worst seen, not the average.** `billing_ratio` is computed per call and the run
+keeps the maximum. A cumulative average would lag a ratio that rises during a run — longer prompts
+tokenising denser than short ones — and lagging here means under-reserving. Keeping the worst
+observation costs a little headroom and removes the failure mode.
 
 **Why the output reserve is derived, not constant.** What has to fit is one `final_answer(...)`, and
 how big that is depends on the benchmark: MBPP submits a function (80–250 tokens), SWE-bench submits

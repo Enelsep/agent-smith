@@ -41,8 +41,11 @@ folded into `prompt_tokens`, and variance between one request and the next.
 """
 
 DEFAULT_WALL_CLOCK_MARGIN = 0.15
-"""Fraction of the wall-clock ceiling held back, for the same reason:
-the forced round trip has to fit inside what is left.
+"""Fraction of the wall-clock ceiling held back for the forced round trip.
+
+Unlike the input budget there is nothing to measure here: how long a call
+will take is not knowable before making it, so the whole reservation is
+this margin.
 """
 
 MIN_OUTPUT_RESERVE = 300
@@ -130,13 +133,18 @@ def capped_max_tokens(default: int | None, remaining: int) -> int:
 
 
 def billing_ratio(billed: int, estimated: int) -> float:
-    """Billed input tokens per token `estimate_tokens` predicted.
+    """What one call was billed, per token `estimate_tokens` predicted.
 
     The ceiling is denominated in what the endpoint charges, while the
     guard can only measure what it is about to send, and the two differ by
     the model's tokenisation, the chat template, and whatever else the
     endpoint folds into `prompt_tokens`. Both numbers are known after every
     call, so the conversion is measured rather than assumed.
+
+    Per call, not cumulative: the caller keeps the largest value seen. A
+    running average of the totals would lag a ratio that rises during the
+    run — longer prompts tokenising denser than short ones, say — and lag
+    in this direction means under-reserving.
 
     Floored at 1.0: an endpoint billing *less* than predicted is a windfall
     to bank, not a licence to send more.
