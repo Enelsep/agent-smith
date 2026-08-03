@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from agent_smith.agent import observation
+from agent_smith.agent import budget, observation
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.llm import LLMResponse, Message, ProviderError
@@ -536,6 +536,88 @@ def test_a_system_exit_still_reaches_the_caller() -> None:
 
     with pytest.raises(SystemExit):
         run_task(a_task(), provider, ExitingSandbox(), clock=FakeClock())
+
+
+def test_the_wall_clock_budget_forces_one_last_submission_attempt() -> None:
+    clock = FakeClock()
+
+    class TimingProvider(FakeProvider):
+        def complete(
+            self,
+            messages: Sequence[Message],
+            stop: list[str] | None = None,
+            max_tokens: int | None = None,
+        ) -> LLMResponse:
+            clock.advance(110.0)
+            return super().complete(messages, stop, max_tokens)
+
+    provider = TimingProvider([a_response(), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), ok("still not done\n")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=clock,
+        max_wall_clock_seconds=120.0,
+    )
+
+    assert solution.success is False
+    assert solution.error is not None
+    assert "wall_clock" in solution.error
+    assert solution.iterations == 2
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": budget.FORCED_SUBMISSION_NUDGE,
+    }
+
+
+def test_the_input_token_budget_forces_one_last_submission_attempt() -> None:
+    provider = FakeProvider(
+        [
+            a_response(input_tokens=5990, output_tokens=5),
+            a_response(input_tokens=100, output_tokens=5),
+        ]
+    )
+    sandbox = FakeSandbox([ok("not done yet\n"), ok("still not done\n")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=6000,
+    )
+
+    assert solution.success is False
+    assert solution.error is not None
+    assert "input_tokens" in solution.error
+    assert solution.iterations == 2
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": budget.FORCED_SUBMISSION_NUDGE,
+    }
+
+
+def test_a_forced_submission_attempt_can_still_succeed() -> None:
+    provider = FakeProvider([a_response(input_tokens=5990), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=6000,
+    )
+
+    assert solution.success is True
+    assert solution.solution == "done"
+    assert solution.error is None
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": budget.FORCED_SUBMISSION_NUDGE,
+    }
 
 
 def test_the_result_of_a_real_run_satisfies_the_contract() -> None:

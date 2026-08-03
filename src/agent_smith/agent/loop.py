@@ -6,6 +6,13 @@ import time
 from typing import TYPE_CHECKING, Protocol
 
 from agent_smith.agent import observation
+from agent_smith.agent.budget import (
+    FORCED_SUBMISSION_NUDGE,
+    capped_max_tokens,
+    estimate_tokens,
+    remaining_output_tokens,
+    should_force_submission,
+)
 from agent_smith.extraction import extract_code
 from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput, StepMetrics
@@ -21,6 +28,22 @@ if TYPE_CHECKING:
 # knows: SWE-bench allows 30 and its CLI passes that. A caller who forgets
 # cannot silently invalidate a run.
 DEFAULT_MAX_ITERATIONS = 10
+
+DEFAULT_MAX_INPUT_TOKENS = 6000
+"""MBPP's cumulative input-token ceiling, the stricter of the two the
+subject enforces (SWE-bench allows 300 000). Same reasoning as
+DEFAULT_MAX_ITERATIONS: a caller that forgets to override it for
+SWE-bench cannot silently invalidate a run by undershooting.
+"""
+
+DEFAULT_MAX_OUTPUT_TOKENS = 1500
+"""MBPP's cumulative output-token ceiling (SWE-bench allows 10 000)."""
+
+DEFAULT_MAX_WALL_CLOCK_SECONDS = 120.0
+"""MBPP's wall-clock ceiling in seconds (SWE-bench allows 900). The 15%
+safety margin should_force_submission applies is computed from this
+value at call time, not baked into it.
+"""
 
 
 class Sandbox(Protocol):
@@ -51,6 +74,9 @@ def run_task(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     compact: Callable[[list[Message]], list[Message]] = _unchanged,
     clock: Callable[[], float] = time.monotonic,
+    max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    max_wall_clock_seconds: float = DEFAULT_MAX_WALL_CLOCK_SECONDS,
 ) -> SolutionOutput:
     """Run one task to a `SolutionOutput`. Never raises.
 
@@ -63,7 +89,15 @@ def run_task(
     """
     run = _Run(task, clock)
     try:
-        run.execute(provider, sandbox, max_iterations, compact)
+        run.execute(
+            provider,
+            sandbox,
+            max_iterations,
+            compact,
+            max_input_tokens,
+            max_output_tokens,
+            max_wall_clock_seconds,
+        )
         return run.to_solution()
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         run.error = f"the agent loop failed: {unexpected}"
@@ -98,11 +132,35 @@ class _Run:
         sandbox: Sandbox,
         max_iterations: int,
         compact: Callable[[list[Message]], list[Message]],
+        max_input_tokens: int,
+        max_output_tokens: int,
+        max_wall_clock_seconds: float,
     ) -> None:
-        """Turn the loop until an answer arrives or the iterations run out."""
+        """Turn the loop until an answer arrives, the budget runs out, or the
+        iterations run out."""
         for step in range(1, max_iterations + 1):
+            remaining_output = remaining_output_tokens(
+                self.total_output_tokens, max_output_tokens
+            )
+            view = compact(self.history)
+            reason = should_force_submission(
+                total_input_tokens=self.total_input_tokens,
+                estimated_next_input=estimate_tokens(view),
+                max_input_tokens=max_input_tokens,
+                elapsed_seconds=self._clock() - self._started,
+                max_wall_clock_seconds=max_wall_clock_seconds,
+                remaining_output_tokens=remaining_output,
+            )
+            if reason is not None:
+                self.history.append(
+                    {"role": "user", "content": FORCED_SUBMISSION_NUDGE}
+                )
+                view = compact(self.history)
             try:
-                answer = provider.complete(compact(self.history))
+                answer = provider.complete(
+                    view,
+                    max_tokens=capped_max_tokens(None, remaining_output),
+                )
             except ProviderError as refused:
                 # CORE-2 has already retried across the key pool and spent its
                 # budget. Retrying here would stack two policies and burn the
@@ -135,6 +193,12 @@ class _Run:
                     repair_note=extracted.repair_note,
                 )
                 self._record(step, answer, extracted.code, said)
+            if reason is not None:
+                self.error = (
+                    f"stopped by the {reason} budget guard at step {step}; "
+                    "no final answer was received"
+                )
+                return
             self.history.append({"role": "user", "content": said})
         self.error = (
             f"the agent used all {max_iterations} iterations without calling "
