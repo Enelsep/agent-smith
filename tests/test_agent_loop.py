@@ -622,23 +622,61 @@ def test_a_forced_submission_attempt_can_still_succeed() -> None:
     }
 
 
-def test_a_forced_run_finishes_under_the_input_ceiling() -> None:
-    # The guard trips while one more round trip still fits, so the
-    # submission it forces lands inside the ceiling. An over-budget run is
-    # scored as a failure whatever it answered.
-    provider = FakeProvider(
-        [
-            a_response(input_tokens=5200, output_tokens=5),
-            a_response(input_tokens=300, output_tokens=5),
-        ]
-    )
-    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+class BillingProvider:
+    """Reports the prompt size it was actually sent, times `ratio`.
+
+    `FakeProvider` reads its token counts off a script, so a test built on
+    it can assert what the guard *said* but never what the run *spent* —
+    the numbers are unrelated to the transcript that produced them. This
+    double couples the two, which is what makes "the run finished under
+    the ceiling" a property a test can fail on.
+
+    `ratio` above 1 stands for the endpoint billing more than chars/4
+    predicts, which is the normal case for code.
+    """
+
+    def __init__(self, ratio: float = 1.0, reply_chars: int = 800) -> None:
+        self._ratio = ratio
+        self._reply_chars = reply_chars
+        self.calls: list[list[Message]] = []
+        self.max_tokens_calls: list[int | None] = []
+
+    def complete(
+        self,
+        messages: Sequence[Message],
+        stop: list[str] | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        self.calls.append(list(messages))
+        self.max_tokens_calls.append(max_tokens)
+        return a_response(
+            "```python\nx = 1  # " + "a" * self._reply_chars + "\n```",
+            input_tokens=int(self._ratio * budget.estimate_tokens(messages)),
+            output_tokens=20,
+        )
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.33])
+def test_a_forced_run_finishes_under_the_input_ceiling(ratio: float) -> None:
+    # The property the guard exists for. It holds because the guard
+    # reserves the forced call before authorising the one in front of it;
+    # counting that request once instead of twice overshoots here, at both
+    # ratios, which is what makes this test worth running.
+    provider = BillingProvider(ratio=ratio)
+    sandbox = FakeSandbox([ok("o" * 400 + "\n")] * 30)
 
     solution = run_task(
-        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+        a_task(system_prompt="S" * 1200, task_prompt="T" * 200),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_iterations=30,
+        max_input_tokens=6000,
+        max_output_tokens=100000,
     )
 
-    assert solution.success is True
+    assert solution.error is not None
+    assert "input_tokens" in solution.error
     assert solution.total_input_tokens <= 6000
 
 
@@ -669,8 +707,90 @@ def test_a_ceiling_below_the_viable_floor_spends_no_request_at_all() -> None:
 
     assert provider.max_tokens_calls == []
     assert solution.iterations == 0
+    assert solution.total_requests == 0
     assert solution.error is not None
     assert "output_tokens" in solution.error
+
+
+def test_an_unanswerable_attempt_names_the_budget_that_blocked_it() -> None:
+    # The wall clock trips first, but what makes the attempt impossible is
+    # the output budget, and that is what the error has to name for a
+    # failure-category breakdown to be worth anything.
+    clock = FakeClock()
+
+    class TimingProvider(FakeProvider):
+        def complete(
+            self,
+            messages: Sequence[Message],
+            stop: list[str] | None = None,
+            max_tokens: int | None = None,
+        ) -> LLMResponse:
+            clock.advance(110.0)
+            return super().complete(messages, stop, max_tokens)
+
+    provider = TimingProvider([a_response(output_tokens=1500), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=clock,
+        max_wall_clock_seconds=120.0,
+        max_output_tokens=1500,
+    )
+
+    assert provider.max_tokens_calls == [1500]
+    assert solution.error is not None
+    assert "output_tokens" in solution.error
+    assert "wall_clock" not in solution.error
+
+
+def test_a_provider_failure_on_the_forced_call_keeps_its_message() -> None:
+    provider = FakeProvider(
+        [
+            a_response(input_tokens=5200),
+            ProviderError("endpoint answered 503"),
+        ]
+    )
+    sandbox = FakeSandbox([ok("not done yet\n")])
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+    )
+
+    assert solution.success is False
+    assert solution.error == "endpoint answered 503"
+
+
+def test_the_nudge_stays_out_of_the_recorded_transcript() -> None:
+    # It goes into the view the provider is handed, never into the
+    # transcript: nothing reads it back, and keeping it out is what frees
+    # CORE-7 from having to preserve the last message it returns.
+    seen: list[list[Message]] = []
+
+    def watching(messages: list[Message]) -> list[Message]:
+        seen.append(list(messages))
+        return messages
+
+    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
+    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        compact=watching,
+        max_input_tokens=6000,
+    )
+
+    assert provider.calls[1][-1]["content"] == budget.FORCED_SUBMISSION_NUDGE
+    assert all(
+        message["content"] != budget.FORCED_SUBMISSION_NUDGE
+        for transcript in seen
+        for message in transcript
+    )
 
 
 def test_the_output_reserve_still_leaves_room_to_answer() -> None:
@@ -771,6 +891,9 @@ def test_compaction_runs_once_per_iteration_even_when_forced() -> None:
         max_input_tokens=6000,
     )
 
+    # Asserting the count alone would keep passing if the trip point moved
+    # and no iteration were ever forced.
+    assert provider.calls[1][-1]["content"] == budget.FORCED_SUBMISSION_NUDGE
     assert len(seen) == 2
 
 

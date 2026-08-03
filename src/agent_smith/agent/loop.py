@@ -11,6 +11,7 @@ from agent_smith.agent.budget import (
     can_attempt_submission,
     capped_max_tokens,
     estimate_tokens,
+    output_reserve,
     remaining_output_tokens,
     should_force_submission,
 )
@@ -160,13 +161,18 @@ class _Run:
                 elapsed_seconds=self._clock() - self._started,
                 max_wall_clock_seconds=max_wall_clock_seconds,
                 remaining_output_tokens=remaining_output,
+                reserved_output_tokens=output_reserve(max_output_tokens),
             )
             if reason is not None:
                 if not can_attempt_submission(remaining_output):
+                    # Reported as an output_tokens stop whatever tripped the
+                    # guard: the label names the budget that blocked the
+                    # attempt, which is what a failure-category breakdown
+                    # needs to know.
                     self.error = (
-                        f"stopped by the {reason} budget guard before step "
-                        f"{step}: {remaining_output} output tokens remained, "
-                        "too few to attempt a final answer"
+                        f"stopped by the output_tokens budget guard before "
+                        f"step {step}: {remaining_output} output tokens "
+                        "remained, too few to attempt a final answer"
                     )
                     return
                 # Added to the view, not to the transcript. The forced

@@ -1,11 +1,12 @@
 """Pure functions deciding when the next LLM call would blow the task budget."""
 
 from agent_smith.agent.budget import (
+    MIN_OUTPUT_RESERVE,
     MIN_VIABLE_OUTPUT_TOKENS,
-    RESERVED_OUTPUT_TOKENS,
     can_attempt_submission,
     capped_max_tokens,
     estimate_tokens,
+    output_reserve,
     remaining_output_tokens,
     should_force_submission,
 )
@@ -54,6 +55,17 @@ def test_an_exhausted_output_budget_is_never_worth_a_request() -> None:
     assert can_attempt_submission(0) is False
 
 
+def test_the_output_reserve_is_a_floor_on_a_small_ceiling() -> None:
+    # MBPP: 15% of 1500 is 225, under the floor sized for a fenced function.
+    assert output_reserve(1500) == MIN_OUTPUT_RESERVE
+
+
+def test_the_output_reserve_scales_with_a_large_ceiling() -> None:
+    # SWE-bench submits a git patch, not a function. A flat 300 would
+    # guarantee a truncated diff on the branch meant to salvage the run.
+    assert output_reserve(10000) == 1500
+
+
 def force_reason(
     *,
     total_input_tokens: int = 100,
@@ -62,6 +74,7 @@ def force_reason(
     elapsed_seconds: float = 10.0,
     max_wall_clock_seconds: float = 120.0,
     remaining_output_tokens: int = 1000,
+    reserved_output_tokens: int = MIN_OUTPUT_RESERVE,
 ) -> str | None:
     """`should_force_submission` with every ceiling healthy by default, so
     each test names only the one it breaches."""
@@ -72,6 +85,7 @@ def force_reason(
         elapsed_seconds=elapsed_seconds,
         max_wall_clock_seconds=max_wall_clock_seconds,
         remaining_output_tokens=remaining_output_tokens,
+        reserved_output_tokens=reserved_output_tokens,
     )
 
 
@@ -79,19 +93,19 @@ def test_nothing_is_forced_while_every_ceiling_is_far_off() -> None:
     assert force_reason() is None
 
 
-def test_the_input_guard_trips_while_one_more_round_trip_still_fits() -> None:
-    # 5000 + 200 is under the 6000 ceiling but over the 15% margin, which
-    # is 5100 — and that is exactly when the run must submit. Tripping
-    # only once 6000 itself is projected would force the submission by
-    # making the very call that busts the budget.
-    assert 5000 + 200 < 6000
-    assert force_reason(total_input_tokens=5000, estimated_next_input=200) == (
+def test_the_input_guard_reserves_the_forced_call_it_will_ask_for() -> None:
+    # 4700 + 250 is under the 15% margin of 5100, so counting the next
+    # request once would let this iteration through — and the forced call
+    # that follows it would then be spent outside any budget the guard
+    # ever checked. Counting it twice is what reserves that call.
+    assert 4700 + 250 < 5100
+    assert force_reason(total_input_tokens=4700, estimated_next_input=250) == (
         "input_tokens"
     )
 
 
-def test_the_input_guard_leaves_room_below_its_margin() -> None:
-    assert force_reason(total_input_tokens=4000, estimated_next_input=200) is None
+def test_the_input_guard_leaves_room_for_two_more_requests() -> None:
+    assert force_reason(total_input_tokens=4000, estimated_next_input=250) is None
 
 
 def test_the_wall_clock_guard_trips_past_its_margin() -> None:
@@ -104,21 +118,30 @@ def test_the_wall_clock_guard_allows_exactly_its_margin() -> None:
 
 
 def test_the_output_guard_trips_below_the_reserve() -> None:
-    assert force_reason(remaining_output_tokens=RESERVED_OUTPUT_TOKENS - 1) == (
+    assert force_reason(remaining_output_tokens=MIN_OUTPUT_RESERVE - 1) == (
         "output_tokens"
     )
 
 
 def test_the_output_guard_allows_exactly_the_reserve() -> None:
-    assert force_reason(remaining_output_tokens=RESERVED_OUTPUT_TOKENS) is None
+    assert force_reason(remaining_output_tokens=MIN_OUTPUT_RESERVE) is None
+
+
+def test_the_output_guard_honours_the_reserve_it_is_given() -> None:
+    # SWE-bench passes a larger reserve; the same remainder trips there
+    # and not on MBPP.
+    assert force_reason(remaining_output_tokens=800, reserved_output_tokens=1500) == (
+        "output_tokens"
+    )
+    assert force_reason(remaining_output_tokens=800, reserved_output_tokens=300) is None
 
 
 def test_input_tokens_are_reported_ahead_of_wall_clock() -> None:
     # Both would trip on their own; input_tokens is checked first.
     assert (
         force_reason(
-            total_input_tokens=5000,
-            estimated_next_input=200,
+            total_input_tokens=4700,
+            estimated_next_input=250,
             elapsed_seconds=110.0,
         )
         == "input_tokens"

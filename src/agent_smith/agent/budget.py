@@ -14,16 +14,14 @@ from agent_smith.llm import Message
 CHARS_PER_TOKEN = 4
 
 DEFAULT_INPUT_MARGIN = 0.15
-"""Fraction of the input ceiling held back for the forced round trip.
+"""Fraction of the input ceiling held back on top of the reserved call.
 
-An over-budget run is scored as a failure whatever it answered, so the
-guard trips while one more request still fits: the submission it forces
-is itself a request, and it has to land inside the ceiling.
-
-The margin also covers `estimate_tokens` being optimistic rather than
-slack: chars/4 is the ratio for prose, code tokenises nearer 3 chars per
-token, and the estimate ignores the per-message chat-template overhead
-the endpoint bills into `prompt_tokens`.
+`should_force_submission` reserves the forced request explicitly, by
+counting the next request twice. This margin covers what that reservation
+cannot: `estimate_tokens` is optimistic rather than slack — chars/4 is the
+ratio for prose, code tokenises nearer 3 chars per token, and the estimate
+ignores the per-message chat-template overhead the endpoint bills into
+`prompt_tokens` — so the reserved call costs more than it was reserved at.
 """
 
 DEFAULT_WALL_CLOCK_MARGIN = 0.15
@@ -31,29 +29,47 @@ DEFAULT_WALL_CLOCK_MARGIN = 0.15
 the forced round trip has to fit inside what is left.
 """
 
-RESERVED_OUTPUT_TOKENS = 300
-"""Output budget held back so a forced attempt has room to answer.
+MIN_OUTPUT_RESERVE = 300
+"""Floor under `output_reserve`, sized for an MBPP answer: a short
+preamble plus a fenced function, 80–250 tokens in practice.
+"""
 
-This is the threshold the guard *trips* on, and it does the real work:
-the budget normally drains a few hundred tokens per step, so stopping
-while this much is left leaves the forced attempt room for a genuine
-fenced code block.
+OUTPUT_RESERVE_FRACTION = 0.15
+"""Share of the output ceiling held back when that is the larger figure.
+
+What has to fit is one `final_answer(...)`, and how big that is depends on
+the benchmark: MBPP submits a function, SWE-bench submits a git patch, and
+a non-trivial diff runs 500–2000 tokens. A flat constant sized for MBPP
+would guarantee a truncated patch on exactly the branch that exists to
+salvage a SWE-bench run.
 """
 
 MIN_VIABLE_OUTPUT_TOKENS = 20
 """Floor below which a forced attempt is not worth a request.
 
-`RESERVED_OUTPUT_TOKENS` normally keeps the budget clear of this, but two
-paths reach it anyway: a single step draining the budget from above the
-reserve in one completion, and a caller configuring a ceiling smaller
-than the reserve. A call capped this low cannot carry a
-`final_answer(...)`, and at zero most OpenAI-compatible endpoints reject
-the request outright. See `can_attempt_submission`.
+The reserve normally keeps the budget clear of this, but two paths reach
+it anyway: a single step draining the budget from above the reserve in
+one completion, and a caller configuring a ceiling smaller than the
+reserve. A call capped this low cannot carry a `final_answer(...)`, and
+at zero most OpenAI-compatible endpoints reject the request outright. See
+`can_attempt_submission`.
 
-The two constants are not interchangeable: the guard trips at
-`remaining < RESERVED_OUTPUT_TOKENS`, so refusing to call at that same
+This is not a smaller spelling of the reserve: the guard trips at
+`remaining < output_reserve(...)`, so refusing to call at that same
 threshold would mean never making a forced attempt on this branch.
 """
+
+
+def output_reserve(max_output_tokens: int) -> int:
+    """Output budget held back so a forced attempt has room to answer.
+
+    This is the threshold the guard trips on, and it does the real work:
+    the budget normally drains a few hundred tokens per step, so stopping
+    while this much is left leaves room for a genuine answer. It lands on
+    300 for MBPP's 1 500-token ceiling and 1 500 for SWE-bench's 10 000.
+    """
+    return max(MIN_OUTPUT_RESERVE, int(OUTPUT_RESERVE_FRACTION * max_output_tokens))
+
 
 FORCED_SUBMISSION_NUDGE = (
     "Your token or time budget for this task is nearly exhausted. Call "
@@ -110,6 +126,7 @@ def should_force_submission(
     elapsed_seconds: float,
     max_wall_clock_seconds: float,
     remaining_output_tokens: int,
+    reserved_output_tokens: int,
     input_margin: float = DEFAULT_INPUT_MARGIN,
     wall_clock_margin: float = DEFAULT_WALL_CLOCK_MARGIN,
 ) -> str | None:
@@ -122,13 +139,22 @@ def should_force_submission(
     the ceiling itself: the point is to submit *under* budget, and a run
     that crosses any of the three is scored as a failure regardless of
     what it answered.
+
+    The input test counts the next request *twice* — once for the call
+    about to be made, once for the forced submission that would follow
+    it. Counting it once bounds `total` from below, not above, and leaves
+    the forced call's own prompt entirely outside the ceiling: the run
+    would then be stopped by a guard that had already spent the budget it
+    was guarding.
     """
-    if total_input_tokens + estimated_next_input > max_input_tokens * (
-        1 - input_margin
+    reserved_for_forced_call = estimated_next_input
+    if (
+        total_input_tokens + estimated_next_input + reserved_for_forced_call
+        > max_input_tokens * (1 - input_margin)
     ):
         return "input_tokens"
     if elapsed_seconds > max_wall_clock_seconds * (1 - wall_clock_margin):
         return "wall_clock"
-    if remaining_output_tokens < RESERVED_OUTPUT_TOKENS:
+    if remaining_output_tokens < reserved_output_tokens:
         return "output_tokens"
     return None

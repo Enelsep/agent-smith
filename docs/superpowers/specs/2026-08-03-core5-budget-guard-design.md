@@ -45,33 +45,42 @@ number is correct.
 
 **Every ceiling gets a buffer, not just wall-clock.** The card names the margin under wall-clock, but
 the reason for it is not specific to time: the guard's whole job is to submit *under* budget, and the
-submission it forces is itself a round trip that has to fit. A check that trips only once the next
-request is projected to cross the ceiling has already lost — it would force the submission by making
-the very call that busts the budget, and an over-budget run is scored as a failure whatever it
-answered. So:
+submission it forces is itself a round trip that has to fit. An over-budget run is scored as a
+failure whatever it answered, so the guard has to stop while there is room for the call it is about
+to ask for. So:
 
 | Ceiling | Buffer | Trips when |
 |---|---|---|
-| Input tokens | `DEFAULT_INPUT_MARGIN`, 15% | `total + estimated_next > max_input_tokens * 0.85` |
+| Input tokens | the forced request, plus `DEFAULT_INPUT_MARGIN` (15%) | `total + 2·estimated_next > max_input_tokens * 0.85` |
 | Wall-clock | `DEFAULT_WALL_CLOCK_MARGIN`, 15% | `elapsed > max_wall_clock_seconds * 0.85` |
-| Output tokens | `RESERVED_OUTPUT_TOKENS`, 300 | `remaining < 300` |
+| Output tokens | `output_reserve(max_output_tokens)` | `remaining < reserve` |
 
-Output tokens get an absolute reserve rather than a percentage because what has to fit is a fixed
-thing — one `final_answer(...)` with a code block — not a proportion of the budget.
+**Why input tokens are counted twice.** `total_input_tokens` accumulates calls *already made*, so
+the request the guard is deciding about — and the forced one that follows it — are both still
+outside it. Counting the next request once bounds `total` from *below*, not above: the trip
+condition `total + E > 0.85·C` says only that `total > 0.85·C − E`, while the real upper bound comes
+from the previous iteration not having tripped, which gives `total ≤ 0.85·C` with a perfect estimate.
+The run then finishes at `total + U ≤ 0.85·C + U`, which needs `U ≤ 0.15·C` — 900 tokens on MBPP — to
+stay under the ceiling. Real transcripts here reach 1 300–2 800 tokens per request, so single
+counting overshoots on most of them. Counting the request twice reserves the forced call explicitly
+and the bound becomes `final ≤ 0.85·C`, with the margin absorbing the estimate's own error.
 
-The input margin also covers a property of `estimate_tokens` that runs the opposite way to
-intuition: chars/4 is **optimistic**, not slack. It is the ratio for prose, code tokenises nearer 3
-chars per token, and it ignores the per-message chat-template overhead the endpoint bills into
-`prompt_tokens`. Sizing the buffer as if the estimate were conservative would put the guard on the
-wrong side of the ceiling exactly when the transcript is longest.
+That error runs the opposite way to intuition: chars/4 is **optimistic**, not slack. It is the ratio
+for prose, code tokenises nearer 3 chars per token, and it ignores the per-message chat-template
+overhead the endpoint bills into `prompt_tokens`. Sizing a buffer as if the estimate were
+conservative would put the guard on the wrong side of the ceiling exactly when the transcript is
+longest.
 
-**What the margin does not cover.** The guard acts on an estimate made *before* a call, so it bounds
-the overshoot rather than eliminating it. Writing `E ≈ 0.75·U` for the estimate against real usage
-`U`, and `C` for the ceiling: the guard trips at `total + E > 0.85·C`, and the forced call then costs
-`U`, so the run finishes near `0.85·C + 0.25·U`. That stays under `C` as long as **one call's input
-is under ~60% of the ceiling** — 3 600 tokens on MBPP, 180 000 on SWE-bench. Both hold by a wide
-margin under any transcript this agent produces, and `CORE-7` only widens it. A single request large
-enough to break that bound would blow the budget on its own, before any guard could see it coming.
+**Why the output reserve is derived, not constant.** What has to fit is one `final_answer(...)`, and
+how big that is depends on the benchmark: MBPP submits a function (80–250 tokens), SWE-bench submits
+a git patch (500–2 000). `output_reserve` is `max(300, 15% of the ceiling)`, landing on 300 for
+MBPP's 1 500 and 1 500 for SWE-bench's 10 000. A flat constant sized for MBPP would guarantee a
+truncated patch on exactly the branch that exists to salvage a SWE-bench run.
+
+The reserve costs nothing on a healthy run: it binds only once the output budget is nearly spent,
+which on a run converging in 2–3 iterations never happens. When it does bind, the run was failing
+anyway, and trading a further iteration for an attempt that can actually emit a complete answer is
+the better trade.
 
 ## `budget.py`
 
@@ -80,9 +89,8 @@ def estimate_tokens(messages: Sequence[Message]) -> int:
     """Approximate the token count of a message list as len(chars) / 4.
 
     A heuristic, not a tokenizer: no dependency, and no assumption about which
-    model's vocabulary applies. The 4-per-token ratio is the standard rough
-    estimate for English/code; the guard's margins are sized to absorb its
-    error, not to make it exact.
+    model's vocabulary applies. It is biased *low*, so it must never be read as
+    a conservative upper bound; DEFAULT_INPUT_MARGIN is sized to cover that.
     """
 
 
@@ -97,12 +105,12 @@ def capped_max_tokens(default: int | None, remaining: int) -> int:
     """
 
 
-RESERVED_OUTPUT_TOKENS = 300
-"""Output budget held back so a forced attempt has room to answer. This is the
-threshold the guard trips on, and it does the real work: the budget normally
-drains a few hundred tokens per step, so stopping while this much is left
-leaves room for a genuine fenced code block.
-"""
+def output_reserve(max_output_tokens: int) -> int:
+    """Output budget held back so a forced attempt has room to answer, as
+    max(MIN_OUTPUT_RESERVE, OUTPUT_RESERVE_FRACTION * ceiling). This is the
+    threshold the guard trips on, and it does the real work.
+    """
+
 
 MIN_VIABLE_OUTPUT_TOKENS = 20
 """Floor below which a forced attempt is not worth a request. The reserve
@@ -129,6 +137,7 @@ def should_force_submission(
     elapsed_seconds: float,
     max_wall_clock_seconds: float,
     remaining_output_tokens: int,
+    reserved_output_tokens: int,
     input_margin: float = DEFAULT_INPUT_MARGIN,
     wall_clock_margin: float = DEFAULT_WALL_CLOCK_MARGIN,
 ) -> str | None:
@@ -184,10 +193,11 @@ reason = should_force_submission(
     elapsed_seconds=self._clock() - self._started,
     max_wall_clock_seconds=max_wall_clock_seconds,
     remaining_output_tokens=remaining_output,
+    reserved_output_tokens=output_reserve(max_output_tokens),
 )
 if reason is not None:
     if not can_attempt_submission(remaining_output):
-        self.error = ...  # names the reason; no request is spent
+        self.error = ...  # names output_tokens; no request is spent
         return
     view = [*view, {"role": "user", "content": FORCED_SUBMISSION_NUDGE}]
 
@@ -248,9 +258,9 @@ its configured default only when the per-call argument is `None`, so a loop that
 - A forced attempt that fails produces an `error` string naming which of the three budgets triggered
   it, distinct from the existing `max_iterations`-exhausted message, so a local failure log (feeding
   `MBPP-5`'s category breakdown later) can tell the two apart.
-- `MIN_VIABLE_OUTPUT_TOKENS` and `RESERVED_OUTPUT_TOKENS` are named constants, not magic numbers,
-  each documented with the job it does: the reserve is what the guard trips on, the floor is what
-  stops a request being spent when the reserve was overrun in a single completion.
+- The reserve and `MIN_VIABLE_OUTPUT_TOKENS` are named, not magic, each documented with the job it
+  does: the reserve is what the guard trips on, the floor is what stops a request being spent when
+  the reserve was overrun in a single completion.
 - When the floor is hit, no request is made at all, so the `error` still names the budget rather than
   being overwritten by whatever the endpoint said about an unanswerable request.
 
