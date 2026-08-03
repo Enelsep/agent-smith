@@ -15,10 +15,8 @@ from pydantic import BaseModel, ValidationError
 
 from agent_smith.config import ConfigError, ResolvedConfig
 from agent_smith.llm.errors import ProviderError
-from agent_smith.llm.keypool import KeyPool
 from agent_smith.llm.protocol import KeySource, Message
 from agent_smith.llm.response import LLMResponse
-from agent_smith.llm.retry import RetryingProvider
 
 # A guard against a hung socket, not a budget. MBPP allows 120 s of wall clock
 # for a task that may take several iterations, so a request that has been
@@ -233,22 +231,16 @@ class OpenAICompatProvider:
 
 def provider_from_config(
     config: ResolvedConfig, *, client: httpx.Client | None = None
-) -> RetryingProvider:
+) -> OpenAICompatProvider:
     """Build the provider the resolved configuration describes.
 
     The one place that knows the assembly order, so no command has to.
-
-    The pool is built once and passed twice — to the provider as its key
-    source, to the retrier as its pool. Two pools would leave the feedback loop
-    open: the retrier would park keys in a pool nobody draws from.
     """
-    pool = KeyPool(config.api_keys)
-    provider = OpenAICompatProvider(
+    return OpenAICompatProvider(
         base_url=config.base_url,
         model=config.model_name,
-        key_source=pool,
+        key_source=StaticKeySource(config.api_keys),
         stop=list(config.stop),
         max_tokens=config.max_tokens,
         client=client,
     )
-    return RetryingProvider(provider, pool)

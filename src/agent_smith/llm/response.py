@@ -13,9 +13,9 @@ class LLMResponse(BaseModel):
     `api_url` is the full endpoint that was called, not the base URL: it is
     per-step evidence of what was contacted.
 
-    `retries` is `0` on a response the provider builds, which the contract
-    defines as "the first attempt succeeded". The retry layer records a higher
-    count with `after_retries()`.
+    `retries` is `0` here and stays `0` until CORE-2. That is the correct
+    value, not a placeholder — the contract defines `0` as "the first attempt
+    succeeded".
     """
 
     model_config = ConfigDict(frozen=True)
@@ -27,12 +27,3 @@ class LLMResponse(BaseModel):
     model: str
     api_url: str
     retries: int = 0
-
-    def after_retries(self, count: int) -> "LLMResponse":
-        """The same completion, recording how many attempts it took to get it.
-
-        Constructing rather than `model_copy(update=...)`, which would skip
-        validation. `retries` is excluded from the dump because passing it
-        alongside the keyword argument is a duplicate-argument `TypeError`.
-        """
-        return LLMResponse(**self.model_dump(exclude={"retries"}), retries=count)
