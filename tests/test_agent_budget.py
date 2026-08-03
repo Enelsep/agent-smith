@@ -3,6 +3,9 @@
 from agent_smith.agent.budget import (
     MIN_OUTPUT_RESERVE,
     MIN_VIABLE_OUTPUT_TOKENS,
+    UNCALIBRATED_BILLING_RATIO,
+    billing_ratio,
+    can_afford_forced_call,
     can_attempt_submission,
     capped_max_tokens,
     estimate_tokens,
@@ -49,6 +52,45 @@ def test_a_submission_is_worth_attempting_from_the_viable_floor_up() -> None:
     assert can_attempt_submission(MIN_VIABLE_OUTPUT_TOKENS - 1) is False
 
 
+def test_the_billing_ratio_is_measured_from_what_was_charged() -> None:
+    assert billing_ratio(billed=1600, estimated=1000) == 1.6
+
+
+def test_a_generous_endpoint_does_not_licence_sending_more() -> None:
+    # Billing under the estimate is a windfall to bank, not headroom to
+    # spend: the next endpoint in the rotation may not be so generous.
+    assert billing_ratio(billed=500, estimated=1000) == 1.0
+
+
+def test_the_billing_ratio_is_pessimistic_before_anything_is_measured() -> None:
+    assert billing_ratio(billed=0, estimated=0) == UNCALIBRATED_BILLING_RATIO
+
+
+def test_a_forced_call_that_would_cross_the_ceiling_is_not_worth_making() -> None:
+    # Reached when the endpoint bills far above what the first,
+    # uncalibrated call assumed. The run is lost either way, but a request
+    # that carries the total past the ceiling cannot be scored a pass, so
+    # it cannot help.
+    assert (
+        can_afford_forced_call(
+            total_input_tokens=5000,
+            estimated_next_input=400,
+            ratio=1.0,
+            max_input_tokens=6000,
+        )
+        is True
+    )
+    assert (
+        can_afford_forced_call(
+            total_input_tokens=5000,
+            estimated_next_input=400,
+            ratio=2.5,
+            max_input_tokens=6000,
+        )
+        is False
+    )
+
+
 def test_an_exhausted_output_budget_is_never_worth_a_request() -> None:
     # The case that would otherwise send max_tokens=0, which most
     # OpenAI-compatible endpoints reject outright.
@@ -70,6 +112,8 @@ def force_reason(
     *,
     total_input_tokens: int = 100,
     estimated_next_input: int = 100,
+    estimated_growth: int = 100,
+    ratio: float = 1.0,
     max_input_tokens: int = 6000,
     elapsed_seconds: float = 10.0,
     max_wall_clock_seconds: float = 120.0,
@@ -81,6 +125,8 @@ def force_reason(
     return should_force_submission(
         total_input_tokens=total_input_tokens,
         estimated_next_input=estimated_next_input,
+        estimated_growth=estimated_growth,
+        ratio=ratio,
         max_input_tokens=max_input_tokens,
         elapsed_seconds=elapsed_seconds,
         max_wall_clock_seconds=max_wall_clock_seconds,
@@ -94,18 +140,49 @@ def test_nothing_is_forced_while_every_ceiling_is_far_off() -> None:
 
 
 def test_the_input_guard_reserves_the_forced_call_it_will_ask_for() -> None:
-    # 4700 + 250 is under the 15% margin of 5100, so counting the next
-    # request once would let this iteration through — and the forced call
-    # that follows it would then be spent outside any budget the guard
-    # ever checked. Counting it twice is what reserves that call.
-    assert 4700 + 250 < 5100
-    assert force_reason(total_input_tokens=4700, estimated_next_input=250) == (
+    # 4500 + 250 is under the 15% margin of 5100, so charging only for the
+    # call in front would let this iteration through — and the forced call
+    # that follows would then be spent outside any budget the guard ever
+    # checked. Reserving it is what trips this.
+    assert 4500 + 250 < 5100
+    assert force_reason(total_input_tokens=4500, estimated_next_input=250) == (
         "input_tokens"
     )
 
 
-def test_the_input_guard_leaves_room_for_two_more_requests() -> None:
+def test_the_input_guard_leaves_room_for_the_round_trip_it_reserved() -> None:
     assert force_reason(total_input_tokens=4000, estimated_next_input=250) is None
+
+
+def test_the_input_guard_converts_estimates_into_billed_tokens() -> None:
+    # The ceiling counts what the endpoint charges. The same transcript
+    # that fits when billing matches the estimate does not fit when the
+    # endpoint bills 60% above it, and the guard has to see that.
+    assert (
+        force_reason(total_input_tokens=3400, estimated_next_input=500, ratio=1.0)
+        is None
+    )
+    assert (
+        force_reason(total_input_tokens=3400, estimated_next_input=500, ratio=1.6)
+        == "input_tokens"
+    )
+
+
+def test_the_input_guard_reserves_the_growth_before_the_forced_call() -> None:
+    # The forced call is not this view: by the time it is made, a reply and
+    # an observation have joined the transcript.
+    assert (
+        force_reason(
+            total_input_tokens=4200, estimated_next_input=300, estimated_growth=0
+        )
+        is None
+    )
+    assert (
+        force_reason(
+            total_input_tokens=4200, estimated_next_input=300, estimated_growth=600
+        )
+        == "input_tokens"
+    )
 
 
 def test_the_wall_clock_guard_trips_past_its_margin() -> None:

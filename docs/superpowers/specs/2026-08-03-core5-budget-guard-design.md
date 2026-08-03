@@ -51,46 +51,52 @@ to ask for. So:
 
 | Ceiling | Buffer | Trips when |
 |---|---|---|
-| Input tokens | the forced request, plus `DEFAULT_INPUT_MARGIN` (15%) | `total + 2·estimated_next > max_input_tokens * 0.85` |
+| Input tokens | the forced round trip, priced in billed tokens, plus `DEFAULT_INPUT_MARGIN` (15%) | `total + ratio·(2·E + growth + nudge) > max_input_tokens * 0.85` |
 | Wall-clock | `DEFAULT_WALL_CLOCK_MARGIN`, 15% | `elapsed > max_wall_clock_seconds * 0.85` |
 | Output tokens | `output_reserve(max_output_tokens)` | `remaining < reserve` |
 
-**Why input tokens are counted twice.** `total_input_tokens` accumulates calls *already made*, so
-the request the guard is deciding about — and the forced one that follows it — are both still
-outside it. Counting the next request once bounds `total` from *below*, not above: the trip
-condition `total + E > 0.85·C` says only that `total > 0.85·C − E`, while the real upper bound comes
-from the previous iteration not having tripped, which gives `total ≤ 0.85·C` with a perfect estimate.
-The run then finishes at `total + U ≤ 0.85·C + U`, which needs `U ≤ 0.15·C` — 900 tokens on MBPP — to
-stay under the ceiling. Real transcripts here reach 1 300–2 800 tokens per request, so single
-counting overshoots on most of them. Counting the request twice reserves the forced call explicitly
-and the bound becomes `final ≤ 0.85·C`, with the margin absorbing the estimate's own error.
+### The input guard, and the two conversions it cannot skip
 
-**Why the estimator stays at chars/4.** It is the prose ratio; code tokenises nearer 3 chars per
-token, so the estimate is optimistic on exactly the content this agent sends. The obvious response —
-divide by 3 and be conservative — is worth less than it looks, because the reservation *scales with
-the estimate*: the same bias applies to the call being authorised and to the forced call held in
-reserve, where it largely cancels. Measured against endpoints billing at 4.0, 3.5 and 3.0 chars per
-token, on a 6 000-token ceiling:
+`total_input_tokens` and the ceiling are denominated in **billed** tokens. `estimate_tokens` returns
+something else — a character count over a divisor. Comparing the two directly is the mistake that
+survived two rounds of this design, in two different forms, so it is worth stating what the guard
+actually has to do.
 
-| Estimator | billed at 4.0 | billed at 3.5 | billed at 3.0 |
-|---|---|---|---|
-| chars/4 | 5 iterations, 4 845 spent | 5, 5 537 | 4, 4 364 |
-| chars/3 | 4 iterations, 3 272 spent | 4, 3 740 | 4, 4 364 |
+The question is: *if I authorise this call, can I still afford the forced submission that follows
+it?* Answering it needs both costs in billed tokens:
 
-Neither overshoots. Dividing by 3 costs an iteration in two cases of three and leaves up to 45% of
-the budget unspent. The plan's own tie-break settles it — *"treat 5/5 with low iteration counts as
-the real target, not 4/5 anyhow"* — so an available iteration is worth more than unused headroom.
-What the estimator must never be read as is a conservative upper bound; the margin, not the
-constant, is what stands between it and the ceiling.
+- **The authorised call** costs `ratio · E`, where `E` is the estimate of the view about to be sent.
+- **The forced call** is not that view. By the time it is made, the model's reply and the resulting
+  observation have joined the transcript, so it costs `ratio · (E + growth + nudge)`.
 
-**Where that stops being true.** The reservation absorbs proportional error, not unbounded error.
-Sweeping the billed ratio on the same 6 000-token ceiling, the run finishes under budget down to
-2.5 chars per token and crosses it at 2.0. Real code tokenises at 3.0–3.5, so the working range
-covers the benchmarks with room to spare, but the limit is a property of the estimate rather than of
-the guard: content that tokenises at 2 chars each — dense punctuation, base64, non-Latin script —
-would defeat any fixed divisor. `tests/test_agent_loop.py` pins the holding range at 1.0, 1.33 and
-1.6× the estimate; if a future benchmark carries that kind of content, calibration (see Deferred)
-becomes the answer rather than a different constant.
+Leave out `ratio` and the reservation under-counts by however much the endpoint bills above the
+divisor. Leave out `growth` and it reserves the wrong view — the one before a full round trip was
+appended to it. Both were left out at some point, and both produced runs that finished over the
+ceiling while reporting that the guard had stopped them.
+
+Neither quantity needs to be guessed. `ratio` is `billed ÷ estimated`, and both numbers are known
+after every call — see `billing_ratio`, floored at 1.0 and pessimistic until the first call has been
+billed. `growth` is the largest increase in `E` observed between iterations. The loop measures both
+and passes them in; `budget.py` stays pure.
+
+Sweeping 2 205 configurations — system prompts of 100–8 000 characters, replies of 100–2 400,
+observations of 100–1 500, and endpoints billing between 4.0 and 1.6 chars per token — every run
+finishes under a 6 000-token ceiling, and the iterations reached degrade smoothly with density
+(3.9 at 4.0 chars/token, 3.3 at 3.0, 2.3 at 1.6) rather than the budget being blown.
+
+**A last check before the forced call.** Reserving ahead makes it rare, but an endpoint billing far
+above what the first uncalibrated call assumed can leave even the forced request unaffordable. It is
+then not made: `can_afford_forced_call` compares it against the ceiling itself, and a run that would
+cross the ceiling is scored a failure whatever it answers, so the request cannot help. This is the
+input counterpart of `can_attempt_submission`, and it is what makes the guarantee unconditional
+rather than contingent on the estimate being close.
+
+**Why the estimator's divisor barely matters now.** chars/4 is the prose ratio and under-counts code.
+That was worth arguing about while the guard compared estimates against a billed ceiling; once the
+conversion is measured, a wrong divisor is absorbed after the first call. What the estimate must
+never be read as is a billed figure. Content that tokenises far denser than any divisor predicts —
+dense punctuation, base64, non-Latin script — is handled by the same measurement rather than by
+picking a different constant.
 
 **Why the output reserve is derived, not constant.** What has to fit is one `final_answer(...)`, and
 how big that is depends on the benchmark: MBPP submits a function (80–250 tokens), SWE-bench submits
@@ -336,13 +342,10 @@ Same pattern CORE-1 through CORE-4 established: scripted doubles, no I/O, exhaus
   statement that our only outbound HTTP is the inference call and trip
   `tests/test_llm_import_boundary.py`. A per-model tokenizer from `transformers` would need each
   model's vocabulary files, for an accuracy the reservation already makes cheap to do without.
-- **Calibrating the estimate from observed usage.** Strictly better than any constant and free of
-  dependencies: after each call both `estimate_tokens(view)` and the billed `answer.input_tokens` are
-  known for the same view, so the real chars-per-token ratio can be measured per model and endpoint
-  from the first iteration onward. Deferred because the reservation already keeps every measured
-  configuration under budget, and `CORE-7` is about to change the shape of the views being
-  estimated — calibrating against an estimator that is about to be re-based would be premature.
-  Worth revisiting once compaction has settled.
+- ~~**Calibrating the estimate from observed usage.**~~ Was listed here as a refinement worth having
+  once compaction had settled. It is not a refinement: without it the guard compares an estimate
+  against a billed ceiling, and runs finish over budget on ordinary transcripts. It ships in this
+  card — see "The input guard, and the two conversions it cannot skip".
 - **Passing the remaining wall clock down to `CORE-2`.** `RetryingProvider` bounds each `complete()`
   with its own `max_elapsed_seconds`, restarted per call, and its docstring anticipates this card
   supplying a smaller value derived from what is left of the task. It does not: `LLMProvider.complete()`

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Protocol
 from agent_smith.agent import observation
 from agent_smith.agent.budget import (
     FORCED_SUBMISSION_NUDGE,
+    billing_ratio,
+    can_afford_forced_call,
     can_attempt_submission,
     capped_max_tokens,
     estimate_tokens,
@@ -135,6 +137,13 @@ class _Run:
         self.error: str | None = None
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        # What the guard needs to convert its estimates into the billed
+        # tokens the ceiling is denominated in, and to reserve the forced
+        # call at the size the transcript will have reached by then. Both
+        # are measured from the run itself rather than assumed.
+        self.total_estimated_input = 0
+        self.largest_growth = 0
+        self._last_estimate = 0
 
     def execute(
         self,
@@ -154,9 +163,19 @@ class _Run:
                 self.total_output_tokens, max_output_tokens
             )
             view = compact(self.history)
+            estimated = estimate_tokens(view)
+            if self._last_estimate:
+                self.largest_growth = max(
+                    self.largest_growth, estimated - self._last_estimate
+                )
+            self._last_estimate = estimated
             reason = should_force_submission(
                 total_input_tokens=self.total_input_tokens,
-                estimated_next_input=estimate_tokens(view),
+                estimated_next_input=estimated,
+                estimated_growth=self.largest_growth or estimated,
+                ratio=billing_ratio(
+                    self.total_input_tokens, self.total_estimated_input
+                ),
                 max_input_tokens=max_input_tokens,
                 elapsed_seconds=self._clock() - self._started,
                 max_wall_clock_seconds=max_wall_clock_seconds,
@@ -164,6 +183,20 @@ class _Run:
                 reserved_output_tokens=output_reserve(max_output_tokens),
             )
             if reason is not None:
+                if not can_afford_forced_call(
+                    total_input_tokens=self.total_input_tokens,
+                    estimated_next_input=estimated,
+                    ratio=billing_ratio(
+                        self.total_input_tokens, self.total_estimated_input
+                    ),
+                    max_input_tokens=max_input_tokens,
+                ):
+                    self.error = (
+                        f"stopped by the input_tokens budget guard before "
+                        f"step {step}: a final attempt would not fit under "
+                        f"the {max_input_tokens}-token ceiling"
+                    )
+                    return
                 if not can_attempt_submission(remaining_output):
                     # Reported as an output_tokens stop whatever tripped the
                     # guard: the label names the budget that blocked the
@@ -192,6 +225,10 @@ class _Run:
                 # task's wall clock; the message is kept as it came.
                 self.error = str(refused)
                 return
+            # Paired with the billed count the response carries, this is
+            # what calibrates the ratio. Accumulated only once a call has
+            # actually been billed, so a refusal cannot deflate it.
+            self.total_estimated_input += estimated
             self.history.append({"role": "assistant", "content": answer.text})
             extracted = extract_code(answer.text, step=step)
             if extracted.code is None:

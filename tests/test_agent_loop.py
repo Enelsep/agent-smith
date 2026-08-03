@@ -575,20 +575,15 @@ def test_the_wall_clock_budget_forces_one_last_submission_attempt() -> None:
 
 
 def test_the_input_token_budget_forces_one_last_submission_attempt() -> None:
-    provider = FakeProvider(
-        [
-            a_response(input_tokens=5990, output_tokens=5),
-            a_response(input_tokens=100, output_tokens=5),
-        ]
-    )
-    sandbox = FakeSandbox([ok("not done yet\n"), ok("still not done\n")])
+    provider = BillingProvider()
+    sandbox = FakeSandbox([a_bulky_observation(), ok("still not done\n")])
 
     solution = run_task(
-        a_task(),
+        forcing_task(),
         provider,
         sandbox,
         clock=FakeClock(),
-        max_input_tokens=6000,
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     assert solution.success is False
@@ -602,15 +597,15 @@ def test_the_input_token_budget_forces_one_last_submission_attempt() -> None:
 
 
 def test_a_forced_submission_attempt_can_still_succeed() -> None:
-    provider = FakeProvider([a_response(input_tokens=5990), a_response()])
-    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+    provider = BillingProvider()
+    sandbox = FakeSandbox([a_bulky_observation(), answered("done")])
 
     solution = run_task(
-        a_task(),
+        forcing_task(),
         provider,
         sandbox,
         clock=FakeClock(),
-        max_input_tokens=6000,
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     assert solution.success is True
@@ -623,21 +618,31 @@ def test_a_forced_submission_attempt_can_still_succeed() -> None:
 
 
 class BillingProvider:
-    """Reports the prompt size it was actually sent, times `ratio`.
+    """Bills for the prompt it was actually sent, times `ratio`.
 
     `FakeProvider` reads its token counts off a script, so a test built on
     it can assert what the guard *said* but never what the run *spent* —
-    the numbers are unrelated to the transcript that produced them. This
-    double couples the two, which is what makes "the run finished under
-    the ceiling" a property a test can fail on.
+    the numbers are unrelated to the transcript that produced them. Worse,
+    the guard now calibrates billed tokens against its own estimate, and a
+    scripted 5 200 against a 19-token prompt reads as an endpoint billing
+    270× over, which it rightly refuses to keep spending against. Any test
+    that needs the input guard to behave realistically needs this double.
 
     `ratio` above 1 stands for the endpoint billing more than chars/4
-    predicts, which is the normal case for code.
+    predicts, which is the normal case for code. `script` supplies reply
+    texts, or exceptions to raise, in place of the default reply; billing
+    stays coupled to the prompt either way.
     """
 
-    def __init__(self, ratio: float = 1.0, reply_chars: int = 800) -> None:
+    def __init__(
+        self,
+        ratio: float = 1.0,
+        reply_chars: int = 800,
+        script: Sequence[object] | None = None,
+    ) -> None:
         self._ratio = ratio
         self._reply_chars = reply_chars
+        self._script = None if script is None else list(script)
         self.calls: list[list[Message]] = []
         self.max_tokens_calls: list[int | None] = []
 
@@ -649,11 +654,34 @@ class BillingProvider:
     ) -> LLMResponse:
         self.calls.append(list(messages))
         self.max_tokens_calls.append(max_tokens)
-        return a_response(
-            "```python\nx = 1  # " + "a" * self._reply_chars + "\n```",
-            input_tokens=int(self._ratio * budget.estimate_tokens(messages)),
-            output_tokens=20,
-        )
+        billed = int(self._ratio * budget.estimate_tokens(messages))
+        text = "```python\nx = 1  # " + "a" * self._reply_chars + "\n```"
+        if self._script is not None:
+            nxt = self._script.pop(0)
+            if isinstance(nxt, BaseException):
+                raise nxt
+            assert isinstance(nxt, str)
+            text = nxt
+        return a_response(text, input_tokens=billed, output_tokens=20)
+
+
+# A transcript and ceiling sized so the guard forces on the second call:
+# the first fits with room reserved for one more, the second does not.
+#
+# The observation is deliberately substantial. With a one-line one the
+# transcript grows so slowly that the window between "forces at step 1"
+# and "does not force until step 3" is about 17 tokens wide, and any
+# reprompting would land outside it. At this size the window is ~350.
+FORCING_SYSTEM_PROMPT = "S" * 1200
+FORCING_INPUT_CEILING = 2100
+
+
+def forcing_task() -> TaskSpec:
+    return a_task(system_prompt=FORCING_SYSTEM_PROMPT)
+
+
+def a_bulky_observation() -> ExecResult:
+    return ok("o" * 400 + "\n")
 
 
 @pytest.mark.parametrize("ratio", [1.0, 1.33, 1.6])
@@ -752,16 +780,20 @@ def test_an_unanswerable_attempt_names_the_budget_that_blocked_it() -> None:
 
 
 def test_a_provider_failure_on_the_forced_call_keeps_its_message() -> None:
-    provider = FakeProvider(
-        [
-            a_response(input_tokens=5200),
+    provider = BillingProvider(
+        script=[
+            "```python\nx = 1  # " + "a" * 800 + "\n```",
             ProviderError("endpoint answered 503"),
         ]
     )
-    sandbox = FakeSandbox([ok("not done yet\n")])
+    sandbox = FakeSandbox([a_bulky_observation()])
 
     solution = run_task(
-        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+        forcing_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     assert solution.success is False
@@ -778,16 +810,16 @@ def test_the_nudge_stays_out_of_the_recorded_transcript() -> None:
         seen.append(list(messages))
         return messages
 
-    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
-    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+    provider = BillingProvider()
+    sandbox = FakeSandbox([a_bulky_observation(), answered("done")])
 
     run_task(
-        a_task(),
+        forcing_task(),
         provider,
         sandbox,
         clock=FakeClock(),
         compact=watching,
-        max_input_tokens=6000,
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     assert provider.calls[1][-1]["content"] == budget.FORCED_SUBMISSION_NUDGE
@@ -815,11 +847,20 @@ def test_the_output_reserve_still_leaves_room_to_answer() -> None:
 def test_a_forced_iteration_whose_extraction_fails_still_ends_the_run() -> None:
     # The other half of the branch: the run must stop after the forced
     # iteration whether or not the reply contained code.
-    provider = FakeProvider([a_response(input_tokens=5200), failed_extraction()])
-    sandbox = FakeSandbox([ok("not done yet\n")])
+    provider = BillingProvider(
+        script=[
+            "```python\nx = 1  # " + "a" * 800 + "\n```",
+            "I think the answer is probably 42, but I am not sure.",
+        ]
+    )
+    sandbox = FakeSandbox([a_bulky_observation()])
 
     solution = run_task(
-        a_task(), provider, sandbox, clock=FakeClock(), max_input_tokens=6000
+        forcing_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     assert solution.success is False
@@ -857,16 +898,32 @@ def test_the_nudge_survives_a_compaction_that_drops_the_tail() -> None:
     # CORE-7 may summarise the transcript into a head window, or into a
     # single message. The nudge is added to the view after compaction, so
     # a forced attempt stays forced whatever compaction does.
-    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
-    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+    #
+    # Forced on the wall clock rather than on tokens, because a compaction
+    # this aggressive holds the transcript at a constant size — which is
+    # precisely why the input guard never trips under it.
+    clock = FakeClock()
+
+    class TimingBillingProvider(BillingProvider):
+        def complete(
+            self,
+            messages: Sequence[Message],
+            stop: list[str] | None = None,
+            max_tokens: int | None = None,
+        ) -> LLMResponse:
+            clock.advance(110.0)
+            return super().complete(messages, stop, max_tokens)
+
+    provider = TimingBillingProvider()
+    sandbox = FakeSandbox([a_bulky_observation(), answered("done")])
 
     run_task(
-        a_task(),
+        forcing_task(),
         provider,
         sandbox,
-        clock=FakeClock(),
+        clock=clock,
         compact=lambda messages: messages[:1],
-        max_input_tokens=6000,
+        max_wall_clock_seconds=120.0,
     )
 
     assert provider.calls[1][-1] == {
@@ -884,16 +941,16 @@ def test_compaction_runs_once_per_iteration_even_when_forced() -> None:
         seen.append(len(messages))
         return messages
 
-    provider = FakeProvider([a_response(input_tokens=5200), a_response()])
-    sandbox = FakeSandbox([ok("not done yet\n"), answered("done")])
+    provider = BillingProvider()
+    sandbox = FakeSandbox([a_bulky_observation(), answered("done")])
 
     run_task(
-        a_task(),
+        forcing_task(),
         provider,
         sandbox,
         clock=FakeClock(),
         compact=counting,
-        max_input_tokens=6000,
+        max_input_tokens=FORCING_INPUT_CEILING,
     )
 
     # Asserting the count alone would keep passing if the trip point moved

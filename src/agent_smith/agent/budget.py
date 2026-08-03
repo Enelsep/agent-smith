@@ -14,24 +14,30 @@ from agent_smith.llm import Message
 CHARS_PER_TOKEN = 4
 """Divisor behind `estimate_tokens`.
 
-Deliberately the prose ratio, not the denser one code really tokenises at.
-A guard wants conservative estimates, so the tempting move is to divide by
-3 — but the reservation in `should_force_submission` scales with the
-estimate, applying the same bias to the call being authorised and to the
-forced call it holds room for, where it largely cancels. Measured against
-endpoints billing at 4.0, 3.5 and 3.0 chars per token, dividing by 3
-overshoots nothing that dividing by 4 overshoots either, and costs an
-iteration in two of the three while leaving up to 45% of the budget
-unspent. The extra iteration is worth more than the unused headroom.
+Its exact value matters little, because `should_force_submission` works in
+*billed* tokens and converts estimates with a ratio measured against what
+the endpoint actually charged — see `billing_ratio`. A wrong divisor is
+absorbed by that measurement after the first call; what it must not do is
+be mistaken for a billed figure.
+"""
+
+UNCALIBRATED_BILLING_RATIO = 1.6
+"""Assumed billed-per-estimated ratio before any call has been billed.
+
+Deliberately pessimistic: it stands for an endpoint tokenising at 2.5
+chars per token, denser than the 3.0–3.5 real code reaches. It applies
+only to the first iteration, where the cumulative total is near zero and
+an over-estimate cannot cost anything.
 """
 
 DEFAULT_INPUT_MARGIN = 0.15
-"""Fraction of the input ceiling held back on top of the reserved call.
+"""Fraction of the input ceiling held back after everything measurable.
 
-The reservation covers the forced request; this covers what scales with
-neither — the per-message chat-template overhead the endpoint bills into
-`prompt_tokens`, the nudge appended after the estimate was taken, and
-variance between one request and the next.
+`should_force_submission` accounts for the two quantities that used to be
+left to this margin — the billing ratio and the transcript's growth
+between the authorised call and the forced one. What is left for the
+margin is what neither measures: the per-message chat-template overhead
+folded into `prompt_tokens`, and variance between one request and the next.
 """
 
 DEFAULT_WALL_CLOCK_MARGIN = 0.15
@@ -88,6 +94,13 @@ FORCED_SUBMISSION_NUDGE = (
 )
 """Placeholder wording. CORE-6 owns the real text for both prompts."""
 
+NUDGE_TOKENS = len(FORCED_SUBMISSION_NUDGE) // CHARS_PER_TOKEN
+"""What the nudge adds to the forced request, in the estimator's own unit.
+
+Derived rather than written down, so CORE-6 rewording the nudge cannot
+silently change what the guard reserves for it.
+"""
+
 
 def estimate_tokens(messages: Sequence[Message]) -> int:
     """Approximate the token count of a message list as len(chars) / 4.
@@ -116,6 +129,46 @@ def capped_max_tokens(default: int | None, remaining: int) -> int:
     return min(default, remaining)
 
 
+def billing_ratio(billed: int, estimated: int) -> float:
+    """Billed input tokens per token `estimate_tokens` predicted.
+
+    The ceiling is denominated in what the endpoint charges, while the
+    guard can only measure what it is about to send, and the two differ by
+    the model's tokenisation, the chat template, and whatever else the
+    endpoint folds into `prompt_tokens`. Both numbers are known after every
+    call, so the conversion is measured rather than assumed.
+
+    Floored at 1.0: an endpoint billing *less* than predicted is a windfall
+    to bank, not a licence to send more.
+    """
+    if estimated <= 0:
+        return UNCALIBRATED_BILLING_RATIO
+    return max(1.0, billed / estimated)
+
+
+def can_afford_forced_call(
+    *,
+    total_input_tokens: int,
+    estimated_next_input: int,
+    ratio: float,
+    max_input_tokens: int,
+) -> bool:
+    """Whether the forced submission fits under the input ceiling.
+
+    The input counterpart of `can_attempt_submission`, and pointless for
+    the same reason when it fails: a run that crosses the ceiling is
+    scored a failure whatever it answered, so a request that cannot fit
+    cannot help. Reserving ahead keeps this rare — it is reached when the
+    endpoint bills far above what the first, uncalibrated call assumed —
+    but the guarantee should not rest on the estimate being close.
+
+    Measured against the ceiling itself, not the margin: this is the last
+    call, so there is nothing further to hold room for.
+    """
+    forced_call = ratio * (estimated_next_input + NUDGE_TOKENS)
+    return total_input_tokens + forced_call <= max_input_tokens
+
+
 def can_attempt_submission(remaining_output_tokens: int) -> bool:
     """Whether a forced attempt has the output budget to be worth making.
 
@@ -135,6 +188,8 @@ def should_force_submission(
     max_input_tokens: int,
     elapsed_seconds: float,
     max_wall_clock_seconds: float,
+    estimated_growth: int,
+    ratio: float,
     remaining_output_tokens: int,
     reserved_output_tokens: int,
     input_margin: float = DEFAULT_INPUT_MARGIN,
@@ -150,17 +205,22 @@ def should_force_submission(
     that crosses any of the three is scored as a failure regardless of
     what it answered.
 
-    The input test counts the next request *twice* — once for the call
-    about to be made, once for the forced submission that would follow
-    it. Counting it once bounds `total` from below, not above, and leaves
-    the forced call's own prompt entirely outside the ceiling: the run
-    would then be stopped by a guard that had already spent the budget it
-    was guarding.
+    The input test asks one question: *if I authorise this call, can I
+    still afford the forced submission that would follow it?* Both costs
+    are converted to billed tokens with `ratio`, because that is the unit
+    `total_input_tokens` and the ceiling are denominated in — comparing a
+    raw estimate against a billed ceiling silently under-reserves by
+    however much the endpoint charges above chars/4.
+
+    The forced call is not this call: by the time it is made the model's
+    reply and the resulting observation have joined the transcript, so it
+    is reserved at `estimated_next_input + estimated_growth`, plus the
+    nudge that will be appended to it.
     """
-    reserved_for_forced_call = estimated_next_input
-    if (
-        total_input_tokens + estimated_next_input + reserved_for_forced_call
-        > max_input_tokens * (1 - input_margin)
+    authorised_call = ratio * estimated_next_input
+    forced_call = ratio * (estimated_next_input + estimated_growth + NUDGE_TOKENS)
+    if total_input_tokens + authorised_call + forced_call > max_input_tokens * (
+        1 - input_margin
     ):
         return "input_tokens"
     if elapsed_seconds > max_wall_clock_seconds * (1 - wall_clock_margin):
