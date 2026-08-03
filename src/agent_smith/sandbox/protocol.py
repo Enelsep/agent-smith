@@ -35,6 +35,7 @@ class ExecResult:
     error: str | None = None
     final_answer: str | None = None
     duration_ms: float = 0.0
+    namespace_reset: bool = False
 
     @property
     def ok(self) -> bool:

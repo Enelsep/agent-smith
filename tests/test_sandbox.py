@@ -92,6 +92,30 @@ def test_worker_crash_reports_crashed_not_timeout(
         assert sb.execute("print('alive')").outcome is Outcome.OK
 
 
+def test_worker_killed_between_calls_flags_namespace_reset() -> None:
+    with Sandbox(timeout=2.0) as sb:
+        assert sb.execute("x = 41").namespace_reset is False  # healthy call
+        assert sb._proc is not None
+
+        # Simulate an external kill / SBX-5 memory-limit death between calls.
+        sb._proc.kill()
+        sb._proc.join(timeout=2)
+        assert not sb._proc.is_alive()
+
+        # The code still runs, but the fresh namespace loss must be surfaced.
+        r = sb.execute("print('fresh start')")
+        assert r.outcome is Outcome.OK
+        assert r.namespace_reset is True
+        assert sb.restarts == 1
+
+        # The state really is gone, and the recovery call does NOT re-flag it.
+        lost = sb.execute("print(x)")
+        assert lost.outcome is Outcome.ERROR
+        assert lost.error is not None
+        assert "NameError" in lost.error
+        assert lost.namespace_reset is False
+
+
 def test_final_answer_unwinds_the_loop() -> None:
     with Sandbox(timeout=2.0) as sb:
         r = sb.execute("y = 7\nfinal_answer(f'the answer is {y}')")

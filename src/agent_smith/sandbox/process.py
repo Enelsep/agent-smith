@@ -108,6 +108,13 @@ class Sandbox:
 
     def execute(self, code: str) -> ExecResult:
         """Run one code block. Never raises on user-code failure."""
+        # A worker that died *between* calls (external kill, or the SBX-5
+        # memory limit) leaves us respawning into a fresh namespace. The code
+        # still runs, but the caller must be told its state is gone -- otherwise
+        # the loss surfaces only as an unexplained NameError, or worse, a
+        # silently wrong result. A never-started worker (`_proc is None`) had no
+        # namespace to lose, so it does not count.
+        namespace_reset = self._proc is not None and not self._proc.is_alive()
         if self._proc is None or not self._proc.is_alive():
             self.restart()
         conn = self._conn
@@ -138,7 +145,7 @@ class Sandbox:
             )
 
         try:
-            return conn.recv()
+            result = conn.recv()
         except (EOFError, OSError):
             self.restart()
             return self._failure_result(
@@ -147,6 +154,9 @@ class Sandbox:
                 "all previously defined variables were lost",
                 started,
             )
+
+        result.namespace_reset = namespace_reset
+        return result
 
     def _failure_result(
         self, outcome: Outcome, message: str, started: float
