@@ -63,6 +63,7 @@ class FakeProvider:
     def __init__(self, script: Sequence[object]) -> None:
         self._script = list(script)
         self.calls: list[list[Message]] = []
+        self.max_tokens_calls: list[int | None] = []
 
     def complete(
         self,
@@ -71,6 +72,7 @@ class FakeProvider:
         max_tokens: int | None = None,
     ) -> LLMResponse:
         self.calls.append(list(messages))
+        self.max_tokens_calls.append(max_tokens)
         answer = self._script.pop(0)
         if isinstance(answer, BaseException):
             raise answer
@@ -618,6 +620,21 @@ def test_a_forced_submission_attempt_can_still_succeed() -> None:
         "role": "user",
         "content": budget.FORCED_SUBMISSION_NUDGE,
     }
+
+
+def test_the_output_budget_shrinks_the_max_tokens_requested_each_call() -> None:
+    provider = FakeProvider(
+        [
+            a_response(output_tokens=500),
+            a_response(output_tokens=500),
+            a_response(output_tokens=500),
+        ]
+    )
+    sandbox = FakeSandbox([ok("a\n"), ok("b\n"), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock(), max_output_tokens=1500)
+
+    assert provider.max_tokens_calls == [1500, 1000, 500]
 
 
 def test_the_result_of_a_real_run_satisfies_the_contract() -> None:
