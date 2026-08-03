@@ -1,5 +1,6 @@
 """One task, run as a Thought -> Code -> Observation cycle."""
 
+import math
 from collections.abc import Sequence
 
 import pytest
@@ -654,7 +655,9 @@ class BillingProvider:
     ) -> LLMResponse:
         self.calls.append(list(messages))
         self.max_tokens_calls.append(max_tokens)
-        billed = int(self._ratio * budget.estimate_tokens(messages))
+        # Rounded up: a double that under-bills would make every ceiling
+        # test optimistic and hide an off-by-one crossing at the boundary.
+        billed = math.ceil(self._ratio * budget.estimate_tokens(messages))
         text = "```python\nx = 1  # " + "a" * self._reply_chars + "\n```"
         if self._script is not None:
             nxt = self._script.pop(0)
@@ -959,6 +962,34 @@ def test_the_nudge_survives_a_compaction_that_drops_the_tail() -> None:
         "role": "user",
         "content": budget.FORCED_SUBMISSION_NUDGE,
     }
+
+
+def test_a_compaction_that_holds_the_view_flat_is_not_forced_early() -> None:
+    # A growth measured as zero is an answer, not a missing one. Treating
+    # it as unknown reserves a second copy of the view for a forced call
+    # that will be exactly this size, and spends iterations the run could
+    # have used to solve. Under CORE-7 a flat transcript is the normal
+    # case, not an edge one — that is what compaction is for.
+    #
+    # At this ceiling the distinction is worth exactly one iteration:
+    # passing the measured zero through reaches all ten, substituting the
+    # view size for it stops at nine.
+    provider = BillingProvider()
+    sandbox = FakeSandbox([ok("o" * 400 + "\n")] * 12)
+
+    solution = run_task(
+        a_task(system_prompt="S" * 1200),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_iterations=10,
+        compact=lambda messages: messages[:2],
+        max_input_tokens=4000,
+        max_output_tokens=10**6,
+    )
+
+    assert solution.iterations == 10
+    assert solution.total_input_tokens <= 4000
 
 
 def test_compaction_runs_once_per_iteration_even_when_forced() -> None:

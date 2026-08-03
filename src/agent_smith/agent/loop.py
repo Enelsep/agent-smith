@@ -142,8 +142,8 @@ class _Run:
         # tokens the ceiling is denominated in, and to reserve the forced
         # call at the size the transcript will have reached by then. Both
         # are measured from the run itself rather than assumed.
-        self.largest_growth = 0
-        self._last_estimate = 0
+        self._largest_growth: int | None = None
+        self._last_estimate: int | None = None
         self._worst_ratio = 0.0
 
     @property
@@ -178,15 +178,21 @@ class _Run:
             )
             view = compact(self.history)
             estimated = estimate_tokens(view)
-            if self._last_estimate:
-                self.largest_growth = max(
-                    self.largest_growth, estimated - self._last_estimate
+            if self._last_estimate is not None:
+                self._largest_growth = max(
+                    self._largest_growth or 0, estimated - self._last_estimate
                 )
             self._last_estimate = estimated
+            # A measured zero is an answer, not a missing one: a compaction
+            # that holds the transcript flat means the forced call really
+            # will be this size. Only the first iteration, which has nothing
+            # to compare against, needs a stand-in — and reserving a second
+            # copy of the view is the pessimistic one.
+            growth = estimated if self._largest_growth is None else self._largest_growth
             reason = should_force_submission(
                 total_input_tokens=self.total_input_tokens,
                 estimated_next_input=estimated,
-                estimated_growth=self.largest_growth or estimated,
+                estimated_growth=growth,
                 ratio=self.ratio,
                 max_input_tokens=max_input_tokens,
                 elapsed_seconds=self._clock() - self._started,
