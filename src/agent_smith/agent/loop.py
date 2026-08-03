@@ -89,6 +89,8 @@ class _Run:
         self.solution = ""
         self.success = False
         self.error: str | None = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
     def execute(
         self,
@@ -160,6 +162,8 @@ class _Run:
                 retries=answer.retries,
             )
         )
+        self.total_input_tokens += answer.input_tokens
+        self.total_output_tokens += answer.output_tokens
 
     def to_solution(self) -> SolutionOutput:
         """Everything the run accumulated, in the shape the moulinette reads."""
@@ -170,8 +174,8 @@ class _Run:
             solution=self.solution,
             iterations=len(self.steps),
             total_requests=sum(1 + step.retries for step in self.steps),
-            total_input_tokens=sum(step.input_tokens for step in self.steps),
-            total_output_tokens=sum(step.output_tokens for step in self.steps),
+            total_input_tokens=self.total_input_tokens,
+            total_output_tokens=self.total_output_tokens,
             total_time_seconds=self._clock() - self._started,
             steps=self.steps,
             system_prompt=self._task.system_prompt,
