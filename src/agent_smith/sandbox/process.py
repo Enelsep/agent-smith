@@ -18,8 +18,7 @@ if TYPE_CHECKING:
     from agent_smith.mcp.protocol import MCPToolDefinition
     from agent_smith.models.contract import SandboxConfig
 
-    ParentConn = Connection[ExecRequest |
-                            ToolReply | None, ExecResult | ToolCall]
+    ParentConn = Connection[ExecRequest | ToolReply | None, ExecResult | ToolCall]
 
     ToolHandler = Callable[[str, dict[str, object]], str]
 

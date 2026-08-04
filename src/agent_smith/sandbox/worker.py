@@ -40,8 +40,7 @@ if TYPE_CHECKING:
 
     from agent_smith.mcp.protocol import MCPToolDefinition
 
-    WorkerConn = Connection[ExecResult |
-                            ToolCall, ExecRequest | ToolReply | None]
+    WorkerConn = Connection[ExecResult | ToolCall, ExecRequest | ToolReply | None]
 
 MAX_OUTPUT_CHARS = 8_000
 
@@ -50,8 +49,7 @@ def _truncate(text: str) -> tuple[str, bool]:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text, False
     omitted = len(text) - MAX_OUTPUT_CHARS
-    clipped = text[:MAX_OUTPUT_CHARS] + \
-        f"\n[... truncated,{omitted} chars omitted ...]"
+    clipped = text[:MAX_OUTPUT_CHARS] + f"\n[... truncated,{omitted} chars omitted ...]"
     return clipped, True
 
 

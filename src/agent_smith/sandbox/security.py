@@ -159,8 +159,7 @@ def _guarded_getattr(obj: object, name: str, *default: object) -> object:
     that gap.
     """
     if isinstance(name, str) and name in BLOCKED_ATTRIBUTES:
-        raise AttributeBlockedError(
-            f"access to '{name}' is blocked by the sandbox")
+        raise AttributeBlockedError(f"access to '{name}' is blocked by the sandbox")
     return getattr(obj, name, *default)
 
 
@@ -188,8 +187,7 @@ def _interpreter_roots() -> tuple[str, ...]:
     denying them would break `import json` inside the sandbox -- so the tree is
     readable while remaining non-writable.
     """
-    roots = {sys.prefix, sys.base_prefix,
-             sys.exec_prefix, sys.base_exec_prefix}
+    roots = {sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix}
     roots.update(entry for entry in sys.path if entry)
     return tuple(sorted(os.path.realpath(r) for r in roots if r))
 
@@ -234,8 +232,7 @@ class FilesystemPolicy:
 
         return cls(
             writable=tuple(dict.fromkeys(writable)),
-            readable=tuple(dict.fromkeys(
-                writable + list(_interpreter_roots()))),
+            readable=tuple(dict.fromkeys(writable + list(_interpreter_roots()))),
             missing=tuple(missing),
         )
 
@@ -243,8 +240,7 @@ class FilesystemPolicy:
     def _contained(path: str, roots: Iterable[str]) -> bool:
         resolved = os.path.realpath(path)
         return any(
-            resolved == root or resolved.startswith(
-                root.rstrip(os.sep) + os.sep)
+            resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)
             for root in roots
         )
 
@@ -429,8 +425,7 @@ def apply_memory_limit(max_memory_mb: int) -> None:
     for resource_id in (resource.RLIMIT_AS, resource.RLIMIT_DATA):
         try:
             _soft, hard = resource.getrlimit(resource_id)
-            ceiling = limit if hard == resource.RLIM_INFINITY else min(
-                limit, hard)
+            ceiling = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
             resource.setrlimit(resource_id, (ceiling, ceiling))
         except (ValueError, OSError):
             continue
@@ -519,8 +514,7 @@ def _guarded_open(
     """
     policy = _STATE.policy
     if policy is not None and isinstance(file, (str, bytes, os.PathLike)):
-        policy.check(os.fsdecode(file), writing=bool(
-            _WRITE_MODE_CHARS & set(mode)))
+        policy.check(os.fsdecode(file), writing=bool(_WRITE_MODE_CHARS & set(mode)))
     return _builtins.open(file, mode, *args, **kwargs)
 
 
