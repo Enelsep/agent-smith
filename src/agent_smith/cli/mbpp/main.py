@@ -26,8 +26,13 @@ BENCHMARK = "mbpp"
 
 # M1 runs with the limits off: the milestone is "one task solved end to end",
 # and a run that dies on iteration ten says nothing about whether the loop
-# works. MBPP-3 brings this back to 10 and adds the CORE-5 budget guard.
+# works. `run_task` defaults to the exam budget (6000/1500/120s), so the
+# ceilings must be raised explicitly too. MBPP-3 brings all of this back to
+# the exam values.
 M1_MAX_ITERATIONS = 25
+M1_MAX_INPUT_TOKENS = 1_000_000
+M1_MAX_OUTPUT_TOKENS = 250_000
+M1_MAX_WALL_CLOCK_SECONDS = 1800.0
 
 # The id we report when the task file itself could not be read, since that is
 # where the real id would have come from.
@@ -143,12 +148,18 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
 
     spec = build_task_spec(task, build_system_prompt(config.sandbox.authorized_imports))
     try:
-        with Sandbox(timeout=config.sandbox.max_execution_time_seconds) as sandbox:
+        with Sandbox(
+            timeout=config.sandbox.max_execution_time_seconds,
+            authorized_imports=config.sandbox.authorized_imports,
+        ) as sandbox:
             return run_task(
                 spec,
                 _provider(config),
                 sandbox,
                 max_iterations=args.max_iterations,
+                max_input_tokens=M1_MAX_INPUT_TOKENS,
+                max_output_tokens=M1_MAX_OUTPUT_TOKENS,
+                max_wall_clock_seconds=M1_MAX_WALL_CLOCK_SECONDS,
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return failed_run(task_id, f"the run could not start: {unexpected}")
