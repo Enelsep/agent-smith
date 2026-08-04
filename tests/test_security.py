@@ -47,10 +47,17 @@ ESCAPES = [
     ("[c for c in ().__class__.__mro__]", "mro walk"),
     ("print.__globals__", "func globals"),
     ("getattr(().__class__, '__subclasses__')", "getattr dunder"),
+]
+
+# These need no scan of their own: they are absent from the builtins allowlist,
+# so reaching for one is already a NameError. See `scan_for_escapes`.
+REMOVED_BUILTINS = [
     ("eval('1+1')", "eval"),
     ("exec('x=1')", "exec"),
     ("compile('1','<s>','eval')", "compile"),
     ("globals()", "globals"),
+    ("vars()", "vars"),
+    ("memoryview(b'x')", "memoryview"),
 ]
 
 
@@ -69,6 +76,16 @@ def test_off_allowlist_imports_are_blocked(sb: Sandbox, code: str) -> None:
 @pytest.mark.parametrize("code", [c[0] for c in ESCAPES], ids=[c[1] for c in ESCAPES])
 def test_introspection_escapes_are_blocked(sb: Sandbox, code: str) -> None:
     assert sb.execute(code).outcome is Outcome.BLOCKED
+
+
+@pytest.mark.parametrize(
+    "code", [c[0] for c in REMOVED_BUILTINS], ids=[c[1] for c in REMOVED_BUILTINS]
+)
+def test_removed_builtins_raise_name_error(sb: Sandbox, code: str) -> None:
+    r = sb.execute(code)
+    assert r.outcome is Outcome.ERROR
+    assert r.error is not None
+    assert "NameError" in r.error
 
 
 def test_final_answer_plain(sb: Sandbox) -> None:

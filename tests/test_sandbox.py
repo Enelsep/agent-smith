@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
 from agent_smith.sandbox.process import Sandbox
 from agent_smith.sandbox.protocol import Outcome
 
-# Adversarial code: swallows the SIGALRM-driven TimeoutError forever, so the
-# soft timeout cannot interrupt it and the parent must hard-kill the worker.
-SWALLOW_ALARM = (
-    "while True:\n    try:\n        pass\n    except TimeoutError:\n        pass\n"
+if TYPE_CHECKING:
+    import pytest
+
+# Adversarial code: blocks SIGALRM at the OS level, so the soft timeout can
+# never fire and the parent must hard-kill the worker.
+#
+# The earlier try/except-swallow version was flaky: the alarm often fired on
+# the `while` line rather than inside the tiny try body, and the soft layer
+# caught it. Masking the signal removes the race entirely. `signal` has to be
+# allowlisted for this test only -- in production the import guard refuses it,
+# which is precisely why this is a defence-in-depth check.
+BLOCK_ALARM = (
+    "import signal\n"
+    "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})\n"
+    "while True:\n    pass\n"
 )
 
 
@@ -57,9 +68,9 @@ def test_soft_timeout_keeps_partial_output_and_namespace() -> None:
 
 
 def test_hard_timeout_restarts_reports_duration_and_loses_namespace() -> None:
-    with Sandbox(timeout=2.0) as sb:
+    with Sandbox(timeout=2.0, authorized_imports=["signal"]) as sb:
         sb.execute("x = 41")
-        r = sb.execute(SWALLOW_ALARM)
+        r = sb.execute(BLOCK_ALARM)
         assert r.outcome is Outcome.HARD_TIMEOUT
         # Regression: the parent-side wait must be timed, not reported as 0.0.
         assert r.duration_ms > 0
