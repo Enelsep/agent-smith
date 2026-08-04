@@ -29,6 +29,10 @@ BENCHMARK = "mbpp"
 # works. `run_task` defaults to the exam budget (6000/1500/120s), so the
 # ceilings must be raised explicitly too. MBPP-3 brings all of this back to
 # the exam values.
+#
+# These are cumulative ceilings only. The per-call `max_tokens` stays the one
+# `models.json` configures, passed as `max_tokens_per_call`: without it the
+# loop offers the whole remaining output budget to every single request.
 M1_MAX_ITERATIONS = 25
 M1_MAX_INPUT_TOKENS = 1_000_000
 M1_MAX_OUTPUT_TOKENS = 250_000
@@ -160,6 +164,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_input_tokens=M1_MAX_INPUT_TOKENS,
                 max_output_tokens=M1_MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=M1_MAX_WALL_CLOCK_SECONDS,
+                max_tokens_per_call=config.max_tokens,
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return failed_run(task_id, f"the run could not start: {unexpected}")

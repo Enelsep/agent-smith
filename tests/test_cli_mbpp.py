@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -153,6 +154,50 @@ def test_it_returns_rather_than_exits_when_it_wrote_a_solution(
     )
 
     cli.main()  # must return, not raise SystemExit
+
+
+def test_the_configured_per_call_ceiling_reaches_the_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The M1 ceilings are cumulative. Without `max_tokens_per_call` the loop
+    # offers the whole remaining output budget to every request, which silently
+    # overrides the `max_tokens` models.json configures.
+    seen: dict[str, object] = {}
+
+    def spy(task, provider, sandbox, **kwargs):  # type: ignore[no-untyped-def]
+        seen.update(kwargs)
+        return cli.failed_run(task.task_id, "stopped after recording the budget")
+
+    monkeypatch.setattr(cli, "run_task", spy)
+    monkeypatch.setattr(cli, "_provider", lambda config: object())
+    monkeypatch.setattr(
+        cli,
+        "resolve_config",
+        lambda **_: SimpleNamespace(
+            base_url="https://example.invalid/v1",
+            model_name="a-model",
+            stop=[],
+            max_tokens=1500,
+            api_keys=["k"],
+            sandbox=SimpleNamespace(
+                max_execution_time_seconds=5.0, authorized_imports=["math"]
+            ),
+        ),
+    )
+
+    cli.solve(
+        cli.parse_args(
+            [
+                "--task-file",
+                str(written_task(tmp_path)),
+                "--output",
+                str(tmp_path / "s.json"),
+            ]
+        )
+    )
+
+    assert seen["max_tokens_per_call"] == 1500
+    assert seen["max_output_tokens"] == cli.M1_MAX_OUTPUT_TOKENS
 
 
 def test_the_model_pair_is_optional() -> None:

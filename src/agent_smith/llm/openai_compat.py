@@ -223,10 +223,12 @@ class OpenAICompatProvider:
         except ValidationError as exc:
             envelope = _error_in_200(response)
             if envelope is not None:
+                code = envelope.error.code
+                named = code if code is not None else "no status"
                 raise ProviderError(
                     f"{self.completions_url} answered 200 carrying error "
-                    f"{envelope.error.code}: {envelope.error.message}",
-                    status_code=envelope.error.code,
+                    f"({named}): {envelope.error.message or response.text}",
+                    status_code=code,
                     headers=dict(response.headers),
                     body=response.text,
                 ) from exc
