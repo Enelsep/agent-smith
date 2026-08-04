@@ -1,5 +1,3 @@
-# will install security guards here later -- see SBX-3/4/5.
-
 from __future__ import annotations
 
 import contextlib
@@ -9,24 +7,40 @@ import time
 import traceback
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from .protocol import ExecResult, FinalAnswerSignal, Outcome
+from agent_smith.mcp.sandbox_integration import get_sandbox_tool_stubs
+
+from .protocol import (
+    ExecRequest,
+    ExecResult,
+    FinalAnswerSignal,
+    Outcome,
+    ToolCall,
+    ToolReply,
+)
 from .security import (
-    AttributeBlocked,
-    ImportBlocked,
+    AttributeBlockedError,
+    FilesystemPolicy,
+    ImportBlockedError,
     ImportGuard,
+    NetworkBlockedError,
+    PathBlockedError,
+    ProcessBlockedError,
+    apply_memory_limit,
     build_sandbox_builtins,
-    purge_sys_modules,
+    enforcement,
+    install_audit_hook,
     scan_for_escapes,
+    suspended,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Sequence
     from multiprocessing.connection import Connection
     from types import FrameType
 
-    from .protocol import ExecRequest
+    from agent_smith.mcp.protocol import MCPToolDefinition
 
-    WorkerConn = Connection[ExecResult, ExecRequest | None]
+    WorkerConn = Connection[ExecResult | ToolCall, ExecRequest | ToolReply | None]
 
 MAX_OUTPUT_CHARS = 8_000
 
@@ -44,17 +58,56 @@ def _on_alarm(signum: int, frame: FrameType | None) -> NoReturn:
     raise TimeoutError("Execution exceeded the sandbox time limit")
 
 
-def _build_namespace(guard: ImportGuard) -> dict[str, Any]:
-    """Create the persistent globals dict handed to exec()."""
+def _make_tool_bridge(conn: WorkerConn) -> Callable[[str, dict[str, Any]], str]:
+    """Build the function the injected tool stubs call to reach the parent.
+
+    Waiting on the parent is not the sandboxed code running, so two things pause
+    for the round trip: the execution timer, because the subject says MCP server
+    work is not subject to the sandbox timeout; and the audit hook, because the
+    pipe traffic here is ours, not the model's.
+    """
+
+    def request(name: str, arguments: dict[str, Any]) -> str:
+        remaining, _ = signal.setitimer(signal.ITIMER_REAL, 0)
+        try:
+            with suspended():
+                conn.send(ToolCall(name=name, arguments=arguments))
+                reply = conn.recv()
+        finally:
+            if remaining > 0:
+                signal.setitimer(signal.ITIMER_REAL, remaining)
+
+        if not isinstance(reply, ToolReply):
+            return f"Observation: the sandbox lost the reply for tool '{name}'."
+        return reply.result
+
+    return request
+
+
+def _build_namespace(
+    guard: ImportGuard,
+    tool_defs: Sequence[MCPToolDefinition] = (),
+    conn: WorkerConn | None = None,
+) -> dict[str, Any]:
+    """Create the persistent globals dict handed to exec().
+
+    `final_answer` is always present; the MCP tool stubs come and go with
+    whichever server is connected.
+    """
 
     def final_answer(value: object) -> NoReturn:
         raise FinalAnswerSignal(value)
 
-    return {
+    namespace: dict[str, Any] = {
         "__name__": "__sandbox__",
         "__builtins__": build_sandbox_builtins(guard),
         "final_answer": final_answer,
     }
+    if tool_defs and conn is not None:
+        namespace.update(
+            get_sandbox_tool_stubs(list(tool_defs), _make_tool_bridge(conn))
+        )
+    return namespace
 
 
 def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecResult:
@@ -71,7 +124,11 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
 
     try:
         signal.setitimer(signal.ITIMER_REAL, timeout)
-        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+        with (
+            contextlib.redirect_stdout(out_buf),
+            contextlib.redirect_stderr(err_buf),
+            enforcement(),
+        ):
             exec(code, namespace)  # noqa: S102
 
     except FinalAnswerSignal as sig:
@@ -86,11 +143,24 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
         outcome = Outcome.SHUTDOWN
         error = f"{type(exc).__name__}: {exc}"
 
-    except (ImportBlocked, AttributeBlocked) as exc:
+    except (
+        ImportBlockedError,
+        AttributeBlockedError,
+        PathBlockedError,
+        NetworkBlockedError,
+        ProcessBlockedError,
+    ) as exc:
         outcome = Outcome.BLOCKED
         error = str(exc)
 
-    except Exception:  # noqa: BLE001 : the broad catch is the point
+    except MemoryError:
+        outcome = Outcome.MEMORY_LIMIT
+        error = (
+            "the sandbox exceeded its memory limit and the allocation was "
+            "refused; the namespace is intact but the operation did not complete"
+        )
+
+    except Exception:  # noqa: BLE001 the broad catch is the point: user code must not escape
         outcome = Outcome.ERROR
         error = "".join(traceback.format_exc(limit=-8))
 
@@ -112,13 +182,26 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
 
 
 def worker_main(
-    conn: WorkerConn, timeout: float, authorized_imports: Iterable[str]
+    conn: WorkerConn,
+    timeout: float,
+    authorized_imports: Iterable[str],
+    allowed_directories: Iterable[str] = (),
+    max_memory_mb: int = 512,
+    tool_defs: Sequence[MCPToolDefinition] = (),
 ) -> None:
-    """entry point for the child process. Loops until the pipe closes."""
+    """Entry point for the child process. Loops until the pipe closes.
+
+    Guard installation order matters: the namespace must exist before any
+    sandboxed code runs, and the memory cap goes on last so the worker's own
+    startup allocations are not counted against the sandbox's budget.
+    """
     signal.signal(signal.SIGALRM, _on_alarm)
     guard = ImportGuard(authorized_imports)
-    purge_sys_modules(guard)
-    namespace = _build_namespace(guard)
+    namespace = _build_namespace(guard, tool_defs, conn)
+
+    policy = FilesystemPolicy.build(allowed_directories)
+    install_audit_hook(policy)
+    apply_memory_limit(max_memory_mb)
 
     while True:
         try:
@@ -127,6 +210,8 @@ def worker_main(
             break
         if request is None:
             break
+        if not isinstance(request, ExecRequest):
+            continue
         conn.send(_execute_once(request.code, namespace, timeout))
 
     conn.close()
