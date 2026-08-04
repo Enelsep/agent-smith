@@ -88,6 +88,27 @@ class TestLoadModelsConfig:
         with pytest.raises(ConfigError):
             load_models_config(write_json(tmp_path / "models.json", payload))
 
+    @pytest.mark.parametrize("budget", [0, -1])
+    def test_an_impossible_token_budget_is_rejected_at_load(
+        self, tmp_path: Path, budget: int
+    ) -> None:
+        # `None` already means "leave the provider's default in force", so a
+        # zero has no valid reading. Left to stand it would reach the endpoint
+        # as `max_tokens: 0` — a 400 raised mid-run, pointing at the network
+        # layer rather than at the line that caused it.
+        payload = {
+            "providers": {
+                "groq": {
+                    "base_url": "https://api.groq.com/openai/v1",
+                    "default_model": "m",
+                    "models": {"m": {"max_tokens": budget}},
+                },
+            },
+        }
+
+        with pytest.raises(ConfigError):
+            load_models_config(write_json(tmp_path / "models.json", payload))
+
     def test_the_error_names_the_file_it_could_not_read(self, tmp_path: Path) -> None:
         path = tmp_path / "models.json"
         path.write_text("{ not json", encoding="utf-8")

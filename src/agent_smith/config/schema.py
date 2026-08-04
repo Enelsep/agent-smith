@@ -18,7 +18,11 @@ class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stop: list[str] = Field(default_factory=list)
-    max_tokens: int | None = None
+    # gt=0 for the same reason extra="forbid" is set above: a zero here
+    # reaches the endpoint as `max_tokens: 0`, which most OpenAI-compatible
+    # APIs reject outright, and the catalogue is the wrong place to find
+    # that out.
+    max_tokens: int | None = Field(default=None, gt=0)
 
 
 class ProviderConfig(BaseModel):
