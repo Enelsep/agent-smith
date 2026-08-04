@@ -51,6 +51,18 @@ def add(a, b):
 
 print(add(2, 3), add(-1, 1))
 ```<end_code>
+
+Example of the final turn, once the printed results matched:
+
+Thought: The outputs match the examples, so I submit the function source.
+```python
+final_answer('''def add(a, b):
+    return a + b
+''')
+```<end_code>
+
+Submitting is also a code block: final_answer is a function that exists in the
+namespace, and writing the solution without calling it does not end the task.
 """
 
 
