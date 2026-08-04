@@ -361,6 +361,16 @@ class TestCompleteErrors:
             _responding_provider(200, text="<html>gateway</html>").complete(_PROMPT)
         assert caught.value.status_code == 200
 
+    def test_an_error_smuggled_in_a_200_carries_the_upstream_status(self) -> None:
+        # OpenRouter answers 200 and puts the routed provider's failure in the
+        # body; the smuggled code must reach CORE-2 so a 502 gets retried
+        # instead of ending the run.
+        body = {"error": {"message": "Upstream overloaded (33/32)", "code": 502}}
+        with pytest.raises(ProviderError) as caught:
+            _responding_provider(200, body=body).complete(_PROMPT)
+        assert caught.value.status_code == 502
+        assert "Upstream overloaded" in str(caught.value)
+
     def test_missing_token_counts_are_an_error_not_a_zero(self) -> None:
         # A run whose token accounting is absent is unusable, not degraded:
         # a silent 0 would corrupt the totals instead of reporting the problem.

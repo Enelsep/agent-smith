@@ -53,6 +53,30 @@ class _ChatCompletion(BaseModel):
     model: str | None = None
 
 
+class _ErrorDetail(BaseModel):
+    message: str | None = None
+    code: int | None = None
+
+
+class _ErrorEnvelope(BaseModel):
+    """An error delivered inside an HTTP 200.
+
+    OpenRouter answers 200 and puts the upstream failure in the body when a
+    routed provider breaks mid-request. The `code` field carries the status the
+    upstream returned, so it feeds the same retry policy as a real one.
+    """
+
+    error: _ErrorDetail
+
+
+def _error_in_200(response: httpx.Response) -> _ErrorEnvelope | None:
+    """The error envelope in this 200's body, if that is what it carries."""
+    try:
+        return _ErrorEnvelope.model_validate_json(response.content)
+    except ValidationError:
+        return None
+
+
 class StaticKeySource:
     """The single key CORE-1 uses.
 
@@ -197,6 +221,15 @@ class OpenAICompatProvider:
         try:
             parsed = _ChatCompletion.model_validate_json(response.content)
         except ValidationError as exc:
+            envelope = _error_in_200(response)
+            if envelope is not None:
+                raise ProviderError(
+                    f"{self.completions_url} answered 200 carrying error "
+                    f"{envelope.error.code}: {envelope.error.message}",
+                    status_code=envelope.error.code,
+                    headers=dict(response.headers),
+                    body=response.text,
+                ) from exc
             raise ProviderError(
                 f"{self.completions_url} returned a body we cannot read: {exc}",
                 status_code=response.status_code,
