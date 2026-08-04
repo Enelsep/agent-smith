@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass  # ,field <- for truncated: bool later
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -14,6 +14,7 @@ class Outcome(str, Enum):
     CRASHED = "crashed"
     FINAL_ANSWER = "final_answer"
     SHUTDOWN = "shutdown"
+    BLOCKED = "blocked"
 
 
 @dataclass
@@ -30,9 +31,11 @@ class ExecResult:
     outcome: Outcome
     stdout: str = ""
     stderr: str = ""
+    truncated: bool = False
     error: str | None = None
     final_answer: str | None = None
     duration_ms: float = 0.0
+    namespace_reset: bool = False
 
     @property
     def ok(self) -> bool:
