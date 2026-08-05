@@ -1,7 +1,10 @@
 """Holding the transcript flat: what survives a compaction and what shrinks."""
 
+import json
 from itertools import pairwise
+from pathlib import Path
 
+from agent_smith.agent.budget import estimate_tokens
 from agent_smith.agent.history import TRUNCATION_MARKER, compact_history
 from agent_smith.llm import Message
 
@@ -130,3 +133,36 @@ def test_the_input_list_is_not_mutated() -> None:
     compact_history(original)
 
     assert [dict(message) for message in original] == before
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "mbpp_160_transcript.json"
+MBPP_INPUT_CEILING = 6000
+"""The cumulative input-token budget MBPP-3 has to fit inside."""
+
+
+def _calls_that_fit(steps: list[dict[str, str]], system: str, verbatim: int) -> int:
+    """How many calls the recorded run would afford under the ceiling."""
+    history: list[Message] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "TASK"},
+    ]
+    spent = 0
+    for index, step in enumerate(steps):
+        spent += estimate_tokens(compact_history(history, verbatim_steps=verbatim))
+        if spent > MBPP_INPUT_CEILING:
+            return index
+        history.append({"role": "assistant", "content": step["llm_output"]})
+        history.append({"role": "user", "content": step["sandbox_output"]})
+    return len(steps)
+
+
+def test_compaction_buys_another_iteration_on_the_worst_recorded_task() -> None:
+    # MBPP task 160 ran seven iterations and cost 17 639 cumulative input
+    # tokens against a 6 000 ceiling. Compaction does not make it pass -- it
+    # needed seven and gets five -- but the headroom it buys is the deliverable,
+    # so it is measured rather than assumed.
+    recorded = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    steps, system = recorded["steps"], recorded["system_prompt"]
+
+    assert _calls_that_fit(steps, system, verbatim=99) == 4
+    assert _calls_that_fit(steps, system, verbatim=1) == 5
