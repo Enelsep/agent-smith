@@ -6,7 +6,7 @@
       "models": {
         "llama-3.3-70b-versatile": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
-          "max_tokens": 400
+          "max_tokens": 1500
         }
       }
     },
@@ -16,11 +16,11 @@
       "models": {
         "qwen/qwen3-235b-a22b-2507": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
-          "max_tokens": 400
+          "max_tokens": 1500
         },
         "nvidia/nemotron-3-ultra-550b-a55b:free": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
-          "max_tokens": 400
+          "max_tokens": 1500
         }
       }
     }

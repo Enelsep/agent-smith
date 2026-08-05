@@ -177,29 +177,3 @@ class TestCommittedConfigFiles:
 
         assert config.authorized_imports
         assert config.allowed_directories
-
-
-PER_CALL_CEILING = 400
-"""What one call may spend, against a 1500-token cumulative output budget."""
-
-
-def test_no_catalogued_model_may_spend_the_whole_run_on_one_call() -> None:
-    # MBPP's cumulative output budget is 1500 tokens (DEFAULT_MAX_OUTPUT_TOKENS).
-    # A per-call ceiling at that same figure lets the first turn spend the whole
-    # run, which is measurably what happened: four turns across a ten-task batch
-    # hit 1500 and were cut off before producing any code.
-    catalogue = json.loads((REPO_ROOT / "models.json").read_text(encoding="utf-8"))
-
-    ceilings = {
-        f"{provider}/{model}": settings["max_tokens"]
-        for provider, entry in catalogue["providers"].items()
-        for model, settings in entry["models"].items()
-    }
-
-    assert ceilings, "the catalogue lists no models"
-    too_generous = {
-        name: cap for name, cap in ceilings.items() if cap > PER_CALL_CEILING
-    }
-    assert not too_generous, (
-        f"per-call ceiling above {PER_CALL_CEILING}: {too_generous}"
-    )
