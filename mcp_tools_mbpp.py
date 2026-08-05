@@ -138,7 +138,19 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
         args = params.get("arguments", {}) or {}
         code = str(args.get("code", ""))
         test_cases = str(args.get("test_cases", ""))
-        timeout = float(args.get("timeout", 5.0))
+
+        raw_timeout = args.get("timeout", 5.0)
+        try:
+            timeout = float(raw_timeout)
+        except (ValueError, TypeError):
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Invalid params: 'timeout' must be a valid number, got {raw_timeout!r}",
+                },
+            }
 
         outcome = _run_tests(code, test_cases, timeout)
         result = {
@@ -273,13 +285,34 @@ async def main() -> None:
         try:
             request = json.loads(raw)
         except json.JSONDecodeError:
+            parse_error = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Parse error"},
+            }
+            sys.stdout.write(json.dumps(parse_error) + "\n")
+            sys.stdout.flush()
             continue
 
         if isinstance(request, dict):
-            response = _handle_request(request)
-            if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+            try:
+                response = _handle_request(request)
+                if response is not None:
+                    sys.stdout.write(json.dumps(response) + "\n")
+                    sys.stdout.flush()
+            except Exception as exc:  # noqa: BLE001
+                req_id = request.get("id")
+                if req_id is not None:
+                    internal_error = {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32603,
+                            "message": f"Internal error: {exc}",
+                        },
+                    }
+                    sys.stdout.write(json.dumps(internal_error) + "\n")
+                    sys.stdout.flush()
 
 
 if __name__ == "__main__":
