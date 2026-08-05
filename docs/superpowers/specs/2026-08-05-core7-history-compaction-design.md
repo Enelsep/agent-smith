@@ -64,23 +64,29 @@ worth a regex over a few kilobytes.
 
 Task 160's real transcript, replayed against the 6 000-token cumulative ceiling:
 
-| Setting | Per-call input | Calls that fit |
-|---|---|---|
-| none (today) | 539, 797, 1993, 2346, 2443, 2780, 2804 | 4 |
-| `verbatim_steps=2` | 539, 797, 1993, 2347, 1254 | 4 |
-| `verbatim_steps=1` | 539, 797, 1993, 1157, 1255, 1500 | 6 |
-| `verbatim_steps=0` | 539, 797, 804, 1158, 1164, 1501, 1525 | 6 |
+| Setting | Per-call input | Cumulative | Calls that fit |
+|---|---|---|---|
+| none (today) | 539, 797, 1993, 2346, 2443, 2780, 2804 | 13 702 | 4 |
+| `verbatim_steps=2` | 539, 797, 1993, 2352, 1264, 1606, 1544 | 10 095 | 4 |
+| `verbatim_steps=1` | 539, 797, 1998, 1167, 1270, 1520, 1549 | 8 840 | **5** |
+| `verbatim_steps=0` | 539, 802, 814, 1172, 1184, 1525, 1555 | 7 591 | 5 |
 
-Headroom grows from four iterations to six — a 50% gain, and the reason `verbatim_steps=1` is the
-default.
+Headroom grows from four iterations to five, and the cumulative cost of the full seven-iteration run
+falls by 35%. `verbatim_steps=1` is the default because it reaches the same call count as the
+harsher setting while leaving the model its most recent reasoning.
 
-**This does not make task 160 pass.** It needed seven iterations; six still fall short. Compaction
+**This does not make task 160 pass.** It needed seven iterations; five still fall short. Compaction
 is necessary and not sufficient: the other half of the budget problem is the iteration count itself,
 which CORE-6 owns through a prompt that drives the model to `run_tests` then `final_answer` in fewer
 turns. The two cards compose; neither substitutes for the other.
 
-The figures carry a small approximation: the task prompt is not stored in `SolutionOutput`, so its
-length was derived from the first call's billed input. Conclusions hold well within that margin.
+Note what the table does *not* show: a spike at the third call, where the 4 784-character reply from
+step 2 is still inside the verbatim window. One verbose turn dominates the whole profile, which is
+why `verbatim_steps=2` buys nothing — it holds that reply one call longer.
+
+These figures come from replaying the recorded transcript through the implementation described
+below, not from an estimate. The one approximation left is the task prompt, which `SolutionOutput`
+does not store; 280 characters was used, and varying it does not change the call counts.
 
 ## Edge cases
 
@@ -108,15 +114,19 @@ sets `DEFAULT_MAX_ITERATIONS` to MBPP's stricter ceiling applies here: a caller 
 be able to invalidate a run silently.
 
 `tests/test_agent_loop.py` calls `run_task` 45 times, of which 5 pass `compact` explicitly — those
-are unaffected. The exposure is the multi-step tests that assert on what reached the provider, three
-sites in total. Each is checked against the new default and updated where compaction legitimately
-changes the view; a test that breaks for any other reason is a finding, not a fixture to adjust.
+are unaffected. Of the remainder, 13 assert on what reached the provider, and every one of them
+inspects `calls[0]` or `calls[1]`. At `verbatim_steps=1` compaction first alters the view on the
+third call, when two steps have completed, so no existing assertion should move.
+
+That prediction is worth stating because it is falsifiable: if a loop test does break, compaction
+reached further back than intended, and that is a finding about the implementation rather than a
+fixture to adjust.
 
 ## Testing
 
 - Shape: system and task survive; the verbatim window is respected; markers appear on reduced steps.
 - Flatness: across N synthetic steps, per-call size stops growing. This is the actual goal, so it is
   tested directly rather than inferred from the shape tests.
-- Regression: task 160's recorded transcript replayed through compaction still fits six calls under
+- Regression: task 160's recorded transcript replayed through compaction still fits five calls under
   6 000 tokens, locking in the measured gain.
 - Edge cases from the table above.
