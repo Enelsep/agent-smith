@@ -57,3 +57,36 @@ def test_the_mbpp_prompt_requires_the_solution_to_carry_its_imports() -> None:
 
     assert "import" in text
     assert "final_answer" in text
+
+
+SWEBENCH_TOOLS = (
+    "read_file",
+    "edit_file",
+    "list_files",
+    "search_code",
+    "search_function_or_class_definition_in_code",
+    "find_references",
+    "run_tests",
+    "get_patch",
+    "run_command",
+)
+
+
+def test_the_swebench_prompt_names_every_tool_the_server_exposes() -> None:
+    text = load_prompt("swebench")
+
+    missing = [tool for tool in SWEBENCH_TOOLS if tool not in text]
+    assert not missing, f"tools absent from the prompt: {missing}"
+
+
+def test_the_swebench_prompt_uses_the_same_turn_shape_as_mbpp() -> None:
+    text = load_prompt("swebench")
+
+    assert "<end_code>" in text
+    assert "Thought:" not in text
+
+
+def test_the_swebench_prompt_says_it_is_unvalidated() -> None:
+    # No agent_swebench CLI exists to run it against, so the file says so
+    # rather than reading as advice anyone has tested.
+    assert "unvalidated" in load_prompt("swebench").lower()
