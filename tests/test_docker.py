@@ -32,7 +32,7 @@ def test_docker_manager_context_manager() -> None:
         with DockerManager("test-image:latest", "test-container") as mgr:
             assert mgr.container_id == "container_id_123"
 
-        # Le cleanup doit être exécuté à la sortie du bloc with
+        # Cleanup must be executed when exiting the with block
         assert mgr.container_id is None
 
 
