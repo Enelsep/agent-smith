@@ -42,6 +42,7 @@ def compact_history(
     treat it as read-only.
     """
     try:
+        verbatim_steps = max(0, verbatim_steps)
         return _compact(messages, verbatim_steps=verbatim_steps)
     except Exception:  # noqa: BLE001 - an oversized view beats a lost run
         return messages
