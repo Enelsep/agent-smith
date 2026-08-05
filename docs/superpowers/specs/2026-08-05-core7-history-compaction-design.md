@@ -9,7 +9,7 @@ whole input budget re-sending its own past.
 prompt and task prompt survive verbatim, the most recent steps survive verbatim, and older steps
 shrink to the code they ran plus the observation it produced.
 
-It fills the seam CORE-4 left: `run_task(compact=...)`, currently defaulted to `_unchanged`.
+It fills the seam CORE-4 left: `run_task(compact=...)` now defaults to `compact_history`.
 
 ## Why the transcript, and not the observations
 
@@ -90,7 +90,8 @@ why `verbatim_steps=2` buys nothing — it holds that reply one call longer.
 
 These figures come from replaying the recorded transcript through the implementation described
 below, not from an estimate. The one approximation left is the task prompt, which `SolutionOutput`
-does not store; 280 characters was used, and varying it does not change the call counts.
+does not store; 280 characters was used. Varying it does not change the `verbatim_steps=1` default
+row, but with a short task prompt the `verbatim_steps=0` row affords six calls rather than five.
 
 ## Edge cases
 
@@ -131,6 +132,8 @@ fixture to adjust.
 - Shape: system and task survive; the verbatim window is respected; markers appear on reduced steps.
 - Flatness: across N synthetic steps, per-call size stops growing. This is the actual goal, so it is
   tested directly rather than inferred from the shape tests.
-- Regression: task 160's recorded transcript replayed through compaction still fits five calls under
-  6 000 tokens, locking in the measured gain.
+- Regression: task 160's recorded transcript is replayed through `compact_history` at its default
+  `verbatim_steps` and against a `verbatim_steps=99` no-compaction baseline, both against the same
+  6 000-token cumulative ceiling; the test asserts compaction affords strictly more calls than the
+  baseline, not an absolute count, so it does not pin a figure the table above could drift from.
 - Edge cases from the table above.

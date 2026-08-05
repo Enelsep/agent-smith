@@ -5,7 +5,11 @@ from itertools import pairwise
 from pathlib import Path
 
 from agent_smith.agent.budget import estimate_tokens
-from agent_smith.agent.history import TRUNCATION_MARKER, compact_history
+from agent_smith.agent.history import (
+    PREAMBLE_LENGTH,
+    TRUNCATION_MARKER,
+    compact_history,
+)
 from agent_smith.llm import Message
 
 
@@ -64,10 +68,16 @@ def test_a_reduced_reply_is_still_an_assistant_turn() -> None:
     assert compacted[2]["role"] == "assistant"
 
 
-def test_every_step_survives_as_a_pair() -> None:
+def test_every_step_survives_as_an_assistant_then_observation_pair() -> None:
     compacted = compact_history(a_history(4), verbatim_steps=1)
 
     assert len(compacted) == len(a_history(4))
+    steps = [compacted[at : at + 2] for at in range(PREAMBLE_LENGTH, len(compacted), 2)]
+    for reply, observation in steps:
+        assert reply["role"] == "assistant"
+        assert observation["role"] == "user"
+    observations = [step[1]["content"] for step in steps]
+    assert observations == [f"observation {n}" for n in range(1, 5)]
 
 
 def test_the_transcript_stops_growing_as_steps_accumulate() -> None:
@@ -124,6 +134,21 @@ def test_an_odd_tail_does_not_raise() -> None:
     messages = [*a_history(2), {"role": "assistant", "content": "dangling"}]
 
     compact_history(messages)  # type: ignore[arg-type]
+
+
+def test_a_malformed_step_returns_the_history_unchanged_instead_of_raising() -> None:
+    # A message dict missing "content" would raise a KeyError from _reduced via
+    # extract_code; compact_history must swallow that and hand back the input.
+    messages: list[Message] = [
+        {"role": "system", "content": "SYSTEM"},
+        {"role": "user", "content": "TASK"},
+        {"role": "assistant"},  # type: ignore[typeddict-item]
+        {"role": "user", "content": "observation 1"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": "observation 2"},
+    ]
+
+    assert compact_history(messages, verbatim_steps=1) == messages
 
 
 def test_the_input_list_is_not_mutated() -> None:

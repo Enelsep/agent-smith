@@ -37,8 +37,18 @@ def compact_history(
     `verbatim_steps` is a parameter because the benchmarks do not share a
     budget: MBPP allows 6 000 cumulative input tokens, SWE-bench 300 000.
 
-    Never raises, and never mutates its argument.
+    Never raises, and never mutates its argument. The returned list shares
+    message objects with `messages` for the steps it keeps unchanged, so
+    treat it as read-only.
     """
+    try:
+        return _compact(messages, verbatim_steps=verbatim_steps)
+    except Exception:  # noqa: BLE001 - an oversized view beats a lost run
+        return messages
+
+
+def _compact(messages: list[Message], *, verbatim_steps: int) -> list[Message]:
+    """The compaction itself, wrapped by the guarantee above."""
     preamble = messages[:PREAMBLE_LENGTH]
     tail = messages[PREAMBLE_LENGTH:]
     steps = [tail[at : at + 2] for at in range(0, len(tail), 2)]
