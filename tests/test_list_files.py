@@ -1,0 +1,60 @@
+"""
+Unit tests for TOOL-3 list_files.
+"""
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from agent_smith.tools.list_files import MAX_FILES_LIMIT, list_files
+
+
+class TestListFilesTool(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+        # Create sample folder structure
+        (self.root / "subdir").mkdir()
+        (self.root / "file1.py").write_text("print('1')", encoding="utf-8")
+        (self.root / "file2.txt").write_text("text", encoding="utf-8")
+        (self.root / "subdir" / "file3.py").write_text("print('3')", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_list_files_pattern_matching(self) -> None:
+        result = list_files(str(self.root), pattern="*.py")
+        lines = result.splitlines()
+
+        self.assertIn("file1.py", lines)
+        self.assertIn("subdir/file3.py", lines)
+        self.assertNotIn("file2.txt", lines)
+
+    def test_list_files_non_existent_directory(self) -> None:
+        result = list_files("non_existent_directory_xyz")
+        self.assertIn(
+            "Error: Directory 'non_existent_directory_xyz' does not exist.", result
+        )
+
+    def test_list_files_not_a_directory(self) -> None:
+        file_path = self.root / "file1.py"
+        result = list_files(str(file_path))
+        self.assertIn("is not a directory", result)
+
+    def test_list_files_truncation_limit(self) -> None:
+        # Create files exceeding MAX_FILES_LIMIT
+        limit_dir = Path(self.temp_dir.name) / "limit_test"
+        limit_dir.mkdir()
+        for i in range(MAX_FILES_LIMIT + 20):
+            (limit_dir / f"test_{i:04d}.txt").write_text("x", encoding="utf-8")
+
+        result = list_files(str(limit_dir), pattern="*.txt")
+        self.assertIn(
+            f"[Truncated: Showing {MAX_FILES_LIMIT} of {MAX_FILES_LIMIT + 20} matched files.]",
+            result,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
