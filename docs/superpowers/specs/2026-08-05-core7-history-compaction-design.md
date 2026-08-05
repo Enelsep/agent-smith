@@ -43,7 +43,7 @@ def compact_history(messages: list[Message], *, verbatim_steps: int = 1) -> list
 A reduced step keeps the assistant role and reads:
 
 ```
-[earlier step — code only, reasoning omitted]
+[earlier step - code only, prose omitted]
 def find_Max_Num(arr):
     ...
 ```
