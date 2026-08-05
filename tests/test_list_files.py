@@ -10,7 +10,6 @@ from agent_smith.tools.list_files import MAX_FILES_LIMIT, list_files
 
 
 class TestListFilesTool(unittest.TestCase):
-
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
@@ -34,7 +33,9 @@ class TestListFilesTool(unittest.TestCase):
 
     def test_list_files_non_existent_directory(self) -> None:
         result = list_files("non_existent_directory_xyz")
-        self.assertIn("Error: Directory 'non_existent_directory_xyz' does not exist.", result)
+        self.assertIn(
+            "Error: Directory 'non_existent_directory_xyz' does not exist.", result
+        )
 
     def test_list_files_not_a_directory(self) -> None:
         file_path = self.root / "file1.py"
@@ -49,7 +50,10 @@ class TestListFilesTool(unittest.TestCase):
             (limit_dir / f"test_{i:04d}.txt").write_text("x", encoding="utf-8")
 
         result = list_files(str(limit_dir), pattern="*.txt")
-        self.assertIn(f"[Truncated: Showing {MAX_FILES_LIMIT} of {MAX_FILES_LIMIT + 20} matched files.]", result)
+        self.assertIn(
+            f"[Truncated: Showing {MAX_FILES_LIMIT} of {MAX_FILES_LIMIT + 20} matched files.]",
+            result,
+        )
 
 
 if __name__ == "__main__":

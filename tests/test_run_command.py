@@ -2,6 +2,7 @@
 Unit tests for TOOL-9 run_command.
 """
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,7 +25,7 @@ class TestRunCommandTool(unittest.TestCase):
 
     def test_run_command_non_zero_exit_code(self) -> None:
         result = run_command(
-            "python -c 'import sys; print(\"error_msg\", file=sys.stderr); sys.exit(42)'",
+            f"{sys.executable} -c 'import sys; print(\"error_msg\", file=sys.stderr); sys.exit(42)'",
             workdir=str(self.root),
         )
         self.assertIn("Exit Code: 42", result)
@@ -38,14 +39,16 @@ class TestRunCommandTool(unittest.TestCase):
 
     def test_run_command_timeout(self) -> None:
         result = run_command(
-            "python -c 'import time; time.sleep(5)'", workdir=str(self.root), timeout=1
+            f"{sys.executable} -c 'import time; time.sleep(5)'",
+            workdir=str(self.root),
+            timeout=1,
         )
         self.assertIn("Error: Command timed out after 1 seconds", result)
 
     def test_run_command_truncation(self) -> None:
         long_str = "x" * (MAX_OUTPUT_CHARS + 500)
         result = run_command(
-            f"python -c 'print(\"{long_str}\")'", workdir=str(self.root)
+            f"{sys.executable} -c 'print(\"{long_str}\")'", workdir=str(self.root)
         )
         self.assertIn("[Truncated: Output exceeded", result)
 

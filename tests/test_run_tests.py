@@ -2,6 +2,7 @@
 Unit tests for TOOL-7 run_tests.
 """
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,7 +51,7 @@ class TestRunTestsTool(unittest.TestCase):
         script_path.write_text("print('1 passed in 0.01s')", encoding="utf-8")
 
         result = run_tests(
-            eval_script="python mock_test.py",
+            eval_script=f"{sys.executable} mock_test.py",
             directory=str(self.root),
         )
         self.assertIn("Test Run Status: PASSED", result)
@@ -68,7 +69,7 @@ class TestRunTestsTool(unittest.TestCase):
         )
 
         result = run_tests(
-            eval_script="python mock_fail.py",
+            eval_script=f"{sys.executable} mock_fail.py",
             directory=str(self.root),
         )
         self.assertIn("Test Run Status: FAILED", result)
