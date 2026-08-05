@@ -61,13 +61,7 @@ def _detail(result: ExecResult) -> str:
             return EMPTY_ANSWER
         return f"{MARKER} final answer:\n{result.final_answer}"
 
-    # A traceback is already addressed to whoever wrote the code, and prefixing
-    # it would only push the interesting last line further right.
     if result.outcome is Outcome.ERROR:
         return (result.error or "the code raised, with no detail").rstrip("\n")
-
-    # Everything left is the sandbox stopping the code rather than the code
-    # stopping itself: a refused import, a timeout, the memory cap, a dead
-    # worker. Naming the outcome makes which one it was unambiguous.
     detail = result.error or "no further detail"
     return f"{MARKER} {result.outcome.value}: {detail}"

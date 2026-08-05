@@ -153,12 +153,9 @@ def run_repl(
         try:
             line = input_fn(CONTINUATION if lines else PROMPT)
         except EOFError:
-            # Ctrl-D leaves the cursor at the end of the prompt line.
             write("")
             return
         except KeyboardInterrupt:
-            # Ctrl-C abandons what was typed. It does not end the session, so
-            # a runaway paste can be escaped without losing the namespace.
             write("KeyboardInterrupt")
             lines = []
             continue
@@ -175,8 +172,6 @@ def run_repl(
         try:
             incomplete = is_incomplete(source)
         except (SyntaxError, ValueError, MemoryError, RecursionError) as malformed:
-            # ValueError covers a null byte in the source; the other two are
-            # what pathological nesting costs the compiler.
             write(f"{type(malformed).__name__}: {malformed}")
             lines = []
             continue

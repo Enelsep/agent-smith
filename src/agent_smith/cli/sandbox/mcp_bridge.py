@@ -124,7 +124,6 @@ class MCPBridge:
         except Exception as unexpected:  # noqa: BLE001 - reported through start()
             self._failure = unexpected
         finally:
-            # Whatever happened, nobody is left waiting on start().
             self._ready.set()
 
     async def _serve(self) -> None:
