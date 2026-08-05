@@ -140,15 +140,32 @@ MBPP_INPUT_CEILING = 6000
 """The cumulative input-token budget MBPP-3 has to fit inside."""
 
 
-def _calls_that_fit(steps: list[dict[str, str]], system: str, verbatim: int) -> int:
-    """How many calls the recorded run would afford under the ceiling."""
+def _calls_that_fit(
+    steps: list[dict[str, str]], system: str, verbatim: int | None = None
+) -> int:
+    """How many calls the recorded run would afford under a plain cumulative ceiling.
+
+    This is a simplified stand-in for `should_force_submission`: it sums
+    `estimate_tokens` against a flat ceiling, with none of that function's 15%
+    margin, billing-ratio conversion, or reserved final call. It is good enough
+    to compare compaction against no compaction, not to predict what `run_task`
+    would actually do.
+
+    `verbatim=None` exercises `compact_history`'s own default rather than
+    pinning a value here, so a regression to that default is caught. The task
+    prompt is a literal "TASK" rather than task 160's real prompt, which
+    understates every call's size a little; that is fine for a relative
+    comparison but means the counts below are not calibrated to any real
+    ceiling.
+    """
     history: list[Message] = [
         {"role": "system", "content": system},
         {"role": "user", "content": "TASK"},
     ]
+    kwargs = {} if verbatim is None else {"verbatim_steps": verbatim}
     spent = 0
     for index, step in enumerate(steps):
-        spent += estimate_tokens(compact_history(history, verbatim_steps=verbatim))
+        spent += estimate_tokens(compact_history(history, **kwargs))
         if spent > MBPP_INPUT_CEILING:
             return index
         history.append({"role": "assistant", "content": step["llm_output"]})
@@ -156,13 +173,19 @@ def _calls_that_fit(steps: list[dict[str, str]], system: str, verbatim: int) -> 
     return len(steps)
 
 
-def test_compaction_buys_another_iteration_on_the_worst_recorded_task() -> None:
+def test_compaction_affords_more_calls_than_no_compaction_on_task_160() -> None:
     # MBPP task 160 ran seven iterations and cost 17 639 cumulative input
-    # tokens against a 6 000 ceiling. Compaction does not make it pass -- it
-    # needed seven and gets five -- but the headroom it buys is the deliverable,
-    # so it is measured rather than assumed.
+    # tokens -- measured fact, not modelled. `_calls_that_fit` re-plays that
+    # transcript against a plain 6 000-token cumulative ceiling (see its
+    # docstring for how that differs from the real `should_force_submission`
+    # guard). Compaction does not make task 160 pass -- it needed seven calls
+    # and this model affords it fewer than that either way -- but it must
+    # afford strictly more than the no-compaction baseline, which is the
+    # headroom this card exists to protect.
     recorded = json.loads(FIXTURE.read_text(encoding="utf-8"))
     steps, system = recorded["steps"], recorded["system_prompt"]
 
-    assert _calls_that_fit(steps, system, verbatim=99) == 4
-    assert _calls_that_fit(steps, system, verbatim=1) == 5
+    without_compaction = _calls_that_fit(steps, system, verbatim=99)
+    with_compaction = _calls_that_fit(steps, system)
+
+    assert with_compaction > without_compaction

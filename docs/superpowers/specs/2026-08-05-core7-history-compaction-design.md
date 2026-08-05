@@ -62,7 +62,11 @@ worth a regex over a few kilobytes.
 
 ## Effect, measured
 
-Task 160's real transcript, replayed against the 6 000-token cumulative ceiling:
+Task 160's real transcript, replayed against a plain 6 000-token cumulative ceiling. This is a
+simplified model of the budget: it sums `estimate_tokens` per call against a flat number, not the
+15% margin, measured billing-ratio conversion, and reserved final call that `should_force_submission`
+applies in `run_task`. The call counts below describe this simplified model, not `run_task`'s
+production behaviour.
 
 | Setting | Per-call input | Cumulative | Calls that fit |
 |---|---|---|---|
