@@ -35,3 +35,25 @@ def test_the_mbpp_prompt_keeps_the_delimiter_the_stack_agrees_on() -> None:
 
 def test_the_mbpp_prompt_still_has_its_imports_placeholder() -> None:
     assert "{imports}" in load_prompt("mbpp")
+
+
+def test_the_mbpp_prompt_no_longer_asks_for_a_thought_preamble() -> None:
+    # The turn is the code block. A `Thought:` line invites the prose that
+    # measurement showed the model runs out of tokens producing.
+    assert "Thought:" not in load_prompt("mbpp")
+
+
+def test_the_mbpp_prompt_forbids_fitting_the_visible_assertions() -> None:
+    text = load_prompt("mbpp").lower()
+
+    assert "hidden" in text
+    assert "subset" in text
+
+
+def test_the_mbpp_prompt_requires_the_solution_to_carry_its_imports() -> None:
+    # A submitted function that uses `math` without importing it passes the
+    # visible run, where the import already happened, and fails the hidden one.
+    text = load_prompt("mbpp").lower()
+
+    assert "import" in text
+    assert "final_answer" in text
