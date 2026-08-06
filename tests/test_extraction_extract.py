@@ -99,12 +99,17 @@ def test_prose_alone_matches_nothing() -> None:
     assert result.strategy is None
 
 
-def test_the_failure_names_the_formats_that_would_have_worked() -> None:
-    failure = extract_code("I think the answer is 42.", step=1).failure
+def test_a_reply_with_no_marker_at_all_says_so_and_names_no_strategy() -> None:
+    # The formats that would have worked are named by
+    # `sandbox.feedback.no_code_block`, which owns every instruction given to
+    # the model so none of them is worded twice. What belongs here is the
+    # diagnosis, and the `strategy is None` that tells the observation layer
+    # this reply never framed a block at all.
+    result = extract_code("I think the answer is 42.", step=1)
 
-    assert failure is not None
-    for expected in ["```python", "<invoke", "<tool_call>", "Action:"]:
-        assert expected in failure
+    assert result.failure is not None
+    assert "No code block was found" in result.failure
+    assert result.strategy is None
 
 
 @pytest.mark.parametrize(

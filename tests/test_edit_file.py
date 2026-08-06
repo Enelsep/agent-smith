@@ -61,7 +61,10 @@ class TestEditFileTool(unittest.TestCase):
             new_str="def main(:",
         )
         self.assertIn("Successfully updated", result)
-        self.assertIn("WARNING: Post-edit AST parsing failed", result)
+        # Reported through the shared sandbox notice, so this reads in the
+        # same voice as every other thing the model is told.
+        self.assertIn("syntax error", result)
+        self.assertIn("Fix it with another edit", result)
 
 
 if __name__ == "__main__":
