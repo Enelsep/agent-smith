@@ -30,5 +30,9 @@ These functions are available in the namespace:
 - run_command(command, workdir) - run a shell command
 - get_patch(directory) - the diff of everything you have changed
 
-get_patch() ends the task: its output is the answer you are judged on. Call it
-once the tests you were given pass.
+final_answer(get_patch()) ends the task. Call it once the tests you were given
+pass; the patch it carries is the answer you are judged on.
+
+get_patch() on its own does not end anything - it hands you the diff as an
+observation and the task keeps going. final_answer is not one of the tools
+above: the sandbox provides it in the namespace whatever server is connected.
