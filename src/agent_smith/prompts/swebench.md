@@ -18,17 +18,7 @@ Observation. The real execution result is given to you in the next message.
 Be brief. A turn that spends its tokens on reasoning is cut off before its code
 and achieves nothing.
 
-These functions are available in the namespace:
-
-- read_file(filepath, start_line, end_line) - file contents, optionally ranged
-- edit_file(filepath, old_str, new_str) - replace an exact occurrence
-- list_files(directory, pattern) - list files matching an fnmatch pattern
-- search_code(pattern, file_pattern) - regex search across the repository
-- search_function_or_class_definition_in_code(name) - locate a definition
-- find_references(name, filepath, line) - find uses of a symbol
-- run_tests(eval_script, directory) - run the repository's tests
-- run_command(command, workdir) - run a shell command
-- get_patch(directory) - the diff of everything you have changed
+{tools}
 
 final_answer(get_patch()) ends the task. Call it once the tests you were given
 pass; the patch it carries is the answer you are judged on.
