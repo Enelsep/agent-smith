@@ -20,6 +20,7 @@ import threading
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
 
+from agent_smith.mcp.formatter import to_sandbox_manual
 from agent_smith.mcp.registry import MCPToolRegistry
 from agent_smith.mcp.sandbox_integration import execute_mcp_tool_call
 
@@ -57,6 +58,7 @@ class MCPBridge:
         self._requests: asyncio.Queue[_Request | None] | None = None
         self._failure: BaseException | None = None
         self.tool_defs: list[MCPToolDefinition] = []
+        self.manual: str = to_sandbox_manual([])
 
     def start(self) -> None:
         """Connect, discover the tools, and leave the session running.
@@ -140,7 +142,10 @@ class MCPBridge:
             await self._disconnect()
             return
 
+        # Rebuilt here, from this server's schemas, every time a session
+        # connects: that is what documents an unknown server automatically.
         self.tool_defs = registry.get_tool_definitions()
+        self.manual = to_sandbox_manual(self.tool_defs)
         self._ready.set()
 
         try:

@@ -25,6 +25,7 @@ from agent_smith.cli.sandbox.mcp_bridge import MCPBridge, MCPBridgeError
 from agent_smith.cli.sandbox.repl import run_repl
 from agent_smith.config import ConfigError
 from agent_smith.config.loader import load_sandbox_config
+from agent_smith.mcp.formatter import to_sandbox_manual
 from agent_smith.models.contract import SandboxConfig
 from agent_smith.sandbox.process import Sandbox
 
@@ -122,22 +123,28 @@ def describe(sandbox: Sandbox, tool_defs: Sequence[MCPToolDefinition]) -> str:
     Read off the built sandbox rather than the config, because `from_config`
     is where an unset allowlist becomes the default one; the numbers here are
     the ones the worker is actually enforcing.
+
+    When a server is connected its manual follows, generated from that
+    server's own schemas. It is the same text the agent's prompt is given, so
+    what a person tries by hand here is documented exactly as the model sees
+    it.
     """
     callables = ", ".join(["final_answer", *(tool.name for tool in tool_defs)])
     directories = ", ".join(sandbox.allowed_directories) or "nothing"
-    return "\n".join(
-        [
-            BANNER,
-            (
-                f"limits: {sandbox.timeout:g}s per entry, "
-                f"{sandbox.max_memory_mb} MB, "
-                f"{len(sandbox.authorized_imports)} authorized imports, "
-                f"file access under {directories}"
-            ),
-            f"available: {callables}",
-            "Type `exit` or press Ctrl-D to leave.",
-        ]
-    )
+    lines = [
+        BANNER,
+        (
+            f"limits: {sandbox.timeout:g}s per entry, "
+            f"{sandbox.max_memory_mb} MB, "
+            f"{len(sandbox.authorized_imports)} authorized imports, "
+            f"file access under {directories}"
+        ),
+        f"available: {callables}",
+        "Type `exit` or press Ctrl-D to leave.",
+    ]
+    if tool_defs:
+        lines += ["", to_sandbox_manual(list(tool_defs))]
+    return "\n".join(lines)
 
 
 def _die(message: str, code: int) -> NoReturn:
