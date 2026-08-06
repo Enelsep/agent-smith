@@ -13,7 +13,13 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from agent_smith.agent.loop import run_task
+from agent_smith.agent.loop import (
+    DEFAULT_MAX_INPUT_TOKENS,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_WALL_CLOCK_SECONDS,
+    run_task,
+)
 from agent_smith.agent.task import TaskSpec
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError, ResolvedConfig, resolve_config
@@ -23,20 +29,6 @@ from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
 from agent_smith.sandbox.process import Sandbox
 
 BENCHMARK = "mbpp"
-
-# M1 runs with the limits off: the milestone is "one task solved end to end",
-# and a run that dies on iteration ten says nothing about whether the loop
-# works. `run_task` defaults to the exam budget (6000/1500/120s), so the
-# ceilings must be raised explicitly too. MBPP-3 brings all of this back to
-# the exam values.
-#
-# These are cumulative ceilings only. The per-call `max_tokens` stays the one
-# `models.json` configures, passed as `max_tokens_per_call`: without it the
-# loop offers the whole remaining output budget to every single request.
-M1_MAX_ITERATIONS = 25
-M1_MAX_INPUT_TOKENS = 1_000_000
-M1_MAX_OUTPUT_TOKENS = 250_000
-M1_MAX_WALL_CLOCK_SECONDS = 1800.0
 
 # The id we report when the task file itself could not be read, since that is
 # where the real id would have come from.
@@ -56,7 +48,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-name", default=None)
     parser.add_argument("--provider-url", default=None)
     parser.add_argument("--env-file", default=None, type=Path)
-    parser.add_argument("--max-iterations", default=M1_MAX_ITERATIONS, type=int)
+    parser.add_argument("--max-iterations", default=DEFAULT_MAX_ITERATIONS, type=int)
     return parser.parse_args(argv)
 
 
@@ -156,14 +148,23 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             timeout=config.sandbox.max_execution_time_seconds,
             authorized_imports=config.sandbox.authorized_imports,
         ) as sandbox:
+            # The four limits of the subject, VI.1.1. Passed explicitly rather
+            # than left to `run_task`'s defaults so the budget this command runs
+            # under is readable here, and read from the loop's constants so
+            # there is one place to change them.
+            #
+            # All four are cumulative. The per-call ceiling is a separate
+            # question: `max_tokens_per_call` carries what `models.json`
+            # configures, and without it the loop would offer the whole
+            # remaining output budget to every single request.
             return run_task(
                 spec,
                 _provider(config),
                 sandbox,
                 max_iterations=args.max_iterations,
-                max_input_tokens=M1_MAX_INPUT_TOKENS,
-                max_output_tokens=M1_MAX_OUTPUT_TOKENS,
-                max_wall_clock_seconds=M1_MAX_WALL_CLOCK_SECONDS,
+                max_input_tokens=DEFAULT_MAX_INPUT_TOKENS,
+                max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
+                max_wall_clock_seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS,
                 max_tokens_per_call=config.max_tokens,
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point

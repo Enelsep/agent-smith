@@ -175,12 +175,10 @@ def test_it_returns_rather_than_exits_when_it_wrote_a_solution(
     cli.main()  # must return, not raise SystemExit
 
 
-def test_the_configured_per_call_ceiling_reaches_the_loop(
+def budget_reaching_the_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The M1 ceilings are cumulative. Without `max_tokens_per_call` the loop
-    # offers the whole remaining output budget to every request, which silently
-    # overrides the `max_tokens` models.json configures.
+) -> dict[str, object]:
+    """Run `solve` against a stubbed loop and return the budget it was handed."""
     seen: dict[str, object] = {}
 
     def spy(task, provider, sandbox, **kwargs):  # type: ignore[no-untyped-def]
@@ -214,9 +212,34 @@ def test_the_configured_per_call_ceiling_reaches_the_loop(
             ]
         )
     )
+    return seen
+
+
+def test_the_configured_per_call_ceiling_reaches_the_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cumulative ceilings say nothing about one request. Without
+    # `max_tokens_per_call` the loop offers the whole remaining output budget to
+    # every request, which silently overrides the `max_tokens` models.json
+    # configures.
+    seen = budget_reaching_the_loop(tmp_path, monkeypatch)
 
     assert seen["max_tokens_per_call"] == 1500
-    assert seen["max_output_tokens"] == cli.M1_MAX_OUTPUT_TOKENS
+
+
+def test_the_exam_ceilings_are_what_the_loop_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The four limits of the subject, VI.1.1. Written as literals rather than
+    # read from the loop's defaults: the point of this card is that the CLI
+    # runs at these numbers, so a change to a default elsewhere must fail here
+    # rather than be adopted silently.
+    seen = budget_reaching_the_loop(tmp_path, monkeypatch)
+
+    assert seen["max_iterations"] == 10
+    assert seen["max_input_tokens"] == 6000
+    assert seen["max_output_tokens"] == 1500
+    assert seen["max_wall_clock_seconds"] == 120.0
 
 
 def test_the_model_pair_is_optional() -> None:
