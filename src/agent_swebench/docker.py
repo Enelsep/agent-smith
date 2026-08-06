@@ -70,9 +70,7 @@ class DockerManager:
                 check=False,
             )
 
-        logger.info(
-            f"Starting container {self.container_name} ({self.image_name})..."
-        )
+        logger.info(f"Starting container {self.container_name} ({self.image_name})...")
 
         # Pull image with local fallback
         try:
@@ -172,9 +170,7 @@ class DockerManager:
                     check=False,
                 )
             except Exception as e:  # noqa: BLE001
-                logger.error(
-                    f"Error while removing container {target}: {e}"
-                )
+                logger.error(f"Error while removing container {target}: {e}")
             finally:
                 self.container_id = None
                 if hasattr(self, "_atexit_handler"):
