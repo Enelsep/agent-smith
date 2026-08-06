@@ -160,6 +160,83 @@ class TestDefaults:
         assert config.sandbox.allowed_directories == ["/testbed"]
 
 
+class TestTheDefaultProviderFollowsTheKeysOnHand:
+    """What happens when no `--provider-url` is passed.
+
+    The `.env` comes from whoever runs us, under whatever variable names they
+    chose, and the subject's own example names `OPENROUTER_API_KEY`. Falling
+    back to one hardcoded provider means a key for any other one is a fatal
+    error before the first call.
+    """
+
+    def test_an_openrouter_key_alone_selects_openrouter(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        config = resolve(config_files, {"OPENROUTER_API_KEY": "key-or"})
+
+        assert config.provider_name == "openrouter"
+        assert config.base_url == "https://openrouter.ai/api/v1"
+        assert config.model_name == "qwen/qwen3-235b-a22b-2507"
+        assert config.api_keys == ["key-or"]
+
+    def test_a_provider_specific_key_wins_over_a_generic_one(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        # A bare API_KEY could belong to any service, so it cannot be the
+        # reason we pick a provider over one that was named explicitly.
+        config = resolve(
+            config_files,
+            {"API_KEY": "key-generic", "OPENROUTER_API_KEY": "key-or"},
+        )
+
+        assert config.provider_name == "openrouter"
+        assert config.api_keys == ["key-or"]
+
+    def test_the_development_default_wins_when_it_has_a_key_of_its_own(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        config = resolve(
+            config_files,
+            {"GROQ_API_KEY": "key-1", "OPENROUTER_API_KEY": "key-or"},
+        )
+
+        assert config.provider_name == "groq"
+        assert config.api_keys == ["key-1"]
+
+    def test_a_generic_key_alone_still_reaches_the_development_default(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        config = resolve(config_files, {"API_KEY": "key-generic"})
+
+        assert config.provider_name == "groq"
+        assert config.api_keys == ["key-generic"]
+
+
+class TestAnExplicitUrlOutranksTheEnvironment:
+    def test_a_url_is_not_overridden_by_a_key_for_another_provider(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        config = resolve(
+            config_files,
+            {"GROQ_API_KEY": "key-1", "OPENROUTER_API_KEY": "key-or"},
+            provider_url="https://openrouter.ai/api/v1",
+        )
+
+        assert config.provider_name == "openrouter"
+        assert config.api_keys == ["key-or"]
+
+    def test_a_url_whose_provider_has_no_key_is_still_an_error(
+        self, config_files: tuple[Path, Path]
+    ) -> None:
+        # Falling back to the groq key here would send it to openrouter.
+        with pytest.raises(ConfigError, match="OPENROUTER_API_KEY"):
+            resolve(
+                config_files,
+                {"GROQ_API_KEY": "key-1"},
+                provider_url="https://openrouter.ai/api/v1",
+            )
+
+
 class TestMissingKeys:
     def test_no_key_at_all_is_fatal(self, config_files: tuple[Path, Path]) -> None:
         with pytest.raises(ConfigError):

@@ -61,13 +61,13 @@ def provider_prefix_from_url(url: str) -> str:
     return second_level.replace("-", "_").upper()
 
 
-def discover_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]:
-    """Collect every API key `env` holds for `prefix`, in preference order.
+def prefixed_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]:
+    """Collect the keys `env` holds under `prefix`'s own names, in order.
 
     Looks under `<PREFIX>_API_KEY`, then `<PREFIX>_API_KEY_2..N`, then a
-    comma-separated `<PREFIX>_API_KEYS`. Generic names are consulted only when
-    nothing prefixed was found. The list may be empty; it is up to the caller
-    to decide whether that is fatal.
+    comma-separated `<PREFIX>_API_KEYS`. Nothing generic: a key found here
+    names its provider, which is what makes a non-empty result usable as
+    evidence that this provider is the one the caller meant.
     """
     keys: list[str] = []
 
@@ -78,6 +78,18 @@ def discover_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]:
 
     for part in (env.get(f"{prefix}_API_KEYS") or "").split(","):
         _append(keys, part)
+
+    return keys
+
+
+def discover_api_keys(prefix: str, env: Mapping[str, str]) -> list[str]:
+    """Collect every API key `env` holds for `prefix`, in preference order.
+
+    `prefixed_api_keys` first; generic names are consulted only when nothing
+    prefixed was found. The list may be empty; it is up to the caller to
+    decide whether that is fatal.
+    """
+    keys = prefixed_api_keys(prefix, env)
 
     if not keys:
         for name in _GENERIC_KEY_NAMES:
