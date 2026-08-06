@@ -182,6 +182,32 @@ def test_end_of_input_ends_the_session() -> None:
     drive(["x = 1"])  # returns rather than hanging or raising
 
 
+def test_end_of_input_runs_a_block_still_waiting_for_its_blank_line() -> None:
+    # Piped input rarely ends with a blank line, so EOF has to close the block.
+    # Previously the buffer was dropped and the entry ran nowhere at all.
+    box = drive(["for i in range(2):", "    print(i)"])
+
+    assert len(box.executed) == 1
+    assert "for i in range(2):" in box.executed[0]
+
+
+def test_a_block_closed_by_a_blank_line_does_not_also_run_at_eof() -> None:
+    box = drive(["for i in range(2):", "    print(i)", ""])
+
+    assert len(box.executed) == 1
+
+
+def test_end_of_input_inside_an_unfinished_block_reports_it() -> None:
+    # The block can never run, but silence is what the old path gave for
+    # everything; the user should hear that the entry was not executed.
+    written: list[str] = []
+    box = FakeSandbox()
+    repl.run_repl(box, input_fn=feed(["for i in range(2):"]), write=written.append)
+
+    assert box.executed == []
+    assert any("SyntaxError" in line for line in written)
+
+
 def test_exit_inside_an_unfinished_block_is_code_not_a_command() -> None:
     # At the continuation prompt the word is part of what is being typed.
     box = drive(["if True:", "    exit", ""])

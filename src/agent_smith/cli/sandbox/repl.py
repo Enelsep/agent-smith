@@ -150,11 +150,17 @@ def run_repl(
 
     lines: list[str] = []
     while True:
+        eof = False
         try:
             line = input_fn(CONTINUATION if lines else PROMPT)
         except EOFError:
             write("")
-            return
+            if not lines:
+                return
+            # End of input closes a pending block the way a blank line does.
+            # Piped input rarely ends with one, and returning here instead
+            # would discard the entry without running it or saying so.
+            eof, line = True, ""
         except KeyboardInterrupt:
             write("KeyboardInterrupt")
             lines = []
@@ -177,10 +183,18 @@ def run_repl(
             continue
 
         if incomplete or not ends_entry(lines):
+            if eof:
+                # Nothing safe to run: the block never finished. Say so rather
+                # than drop it, which is what the old EOF path did to
+                # everything.
+                write("SyntaxError: unexpected end of input")
+                return
             continue
 
         entry, lines = source, []
         _run_entry(sandbox, entry, write)
+        if eof:
+            return
 
 
 def _run_entry(sandbox: Sandbox, source: str, write: Callable[[str], None]) -> None:
