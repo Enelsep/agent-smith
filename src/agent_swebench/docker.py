@@ -4,6 +4,7 @@ import atexit
 import contextlib
 import logging
 import subprocess
+from pathlib import Path
 from types import TracebackType
 
 from typing_extensions import Self
@@ -158,6 +159,16 @@ class DockerManager:
         except Exception:
             self.cleanup()
             raise
+
+    def copy_in(self, source: Path, destination: str) -> None:
+        """Copy a file from the host into the running container."""
+        if self.container_id is None:
+            raise RuntimeError("the container is not running")
+        subprocess.run(
+            ["docker", "cp", str(source), f"{self.container_id}:{destination}"],
+            capture_output=True,
+            check=True,
+        )
 
     def exec(
         self,

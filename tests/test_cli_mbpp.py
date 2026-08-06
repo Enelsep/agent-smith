@@ -122,7 +122,7 @@ def test_the_system_prompt_names_the_delimiter_the_stack_agrees_on() -> None:
 def test_a_solution_is_written_to_the_requested_path(tmp_path: Path) -> None:
     out = tmp_path / "nested" / "solution.json"
 
-    cli.write_solution(out, cli.failed_run("11", "boom"))
+    cli.write_solution(out, cli._failed("11", "boom"))
 
     written = SolutionOutput.model_validate_json(out.read_text(encoding="utf-8"))
     assert written.task_id == "11"
@@ -183,10 +183,10 @@ def budget_reaching_the_loop(
 
     def spy(task, provider, sandbox, **kwargs):  # type: ignore[no-untyped-def]
         seen.update(kwargs)
-        return cli.failed_run(task.task_id, "stopped after recording the budget")
+        return cli._failed(task.task_id, "stopped after recording the budget")
 
     monkeypatch.setattr(cli, "run_task", spy)
-    monkeypatch.setattr(cli, "_provider", lambda config: object())
+    monkeypatch.setattr(cli, "build_provider", lambda config: object())
     monkeypatch.setattr(
         cli,
         "resolve_config",

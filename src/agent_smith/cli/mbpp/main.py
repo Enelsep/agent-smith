@@ -21,14 +21,19 @@ from agent_smith.agent.loop import (
     run_task,
 )
 from agent_smith.agent.task import TaskSpec
+from agent_smith.cli.common import build_provider, failed_run, write_solution
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
-from agent_smith.config import ConfigError, ResolvedConfig, resolve_config
-from agent_smith.llm.keypool import KeyPool
-from agent_smith.llm.retry import RetryingProvider
+from agent_smith.config import ConfigError, resolve_config
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
 from agent_smith.sandbox.process import Sandbox
 
 BENCHMARK = "mbpp"
+
+
+def _failed(task_id: str, error: str) -> SolutionOutput:
+    """`failed_run` with this CLI's benchmark already filled in."""
+    return failed_run(BENCHMARK, task_id, error)
+
 
 # The id we report when the task file itself could not be read, since that is
 # where the real id would have come from.
@@ -83,54 +88,12 @@ def build_task_spec(task: MBPPTaskInput, system_prompt: str) -> TaskSpec:
     )
 
 
-def failed_run(task_id: str, error: str) -> SolutionOutput:
-    """A valid solution for a run that never got as far as an iteration."""
-    return SolutionOutput(
-        task_id=task_id,
-        benchmark=BENCHMARK,
-        success=False,
-        solution="",
-        iterations=0,
-        total_requests=0,
-        total_input_tokens=0,
-        total_output_tokens=0,
-        total_time_seconds=0.0,
-        error=error,
-    )
-
-
-def write_solution(path: Path, solution: SolutionOutput) -> None:
-    """Write the solution to the requested path, creating its directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(solution.model_dump_json(indent=2), encoding="utf-8")
-
-
-def _provider(config: ResolvedConfig) -> RetryingProvider:
-    """Build the provider stack.
-
-    Imported here rather than at module scope: `openai_compat` is the only
-    module that pulls in an HTTP client, and `tests/test_llm_import_boundary.py`
-    checks that the rest of the tree does not.
-    """
-    from agent_smith.llm.openai_compat import OpenAICompatProvider
-
-    pool = KeyPool(config.api_keys)
-    inner = OpenAICompatProvider(
-        config.base_url,
-        config.model_name,
-        pool,
-        stop=config.stop,
-        max_tokens=config.max_tokens,
-    )
-    return RetryingProvider(inner, pool)
-
-
 def solve(args: argparse.Namespace) -> SolutionOutput:
     """Run one task to a solution. Never raises."""
     try:
         task = load_task(args.task_file)
     except ConfigError as unusable:
-        return failed_run(UNKNOWN_TASK_ID, str(unusable))
+        return _failed(UNKNOWN_TASK_ID, str(unusable))
 
     task_id = str(task.task_id)
     try:
@@ -140,7 +103,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             env_file=args.env_file,
         )
     except ConfigError as unresolved:
-        return failed_run(task_id, str(unresolved))
+        return _failed(task_id, str(unresolved))
 
     spec = build_task_spec(task, build_system_prompt(config.sandbox.authorized_imports))
     try:
@@ -159,7 +122,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             # remaining output budget to every single request.
             return run_task(
                 spec,
-                _provider(config),
+                build_provider(config),
                 sandbox,
                 max_iterations=args.max_iterations,
                 max_input_tokens=DEFAULT_MAX_INPUT_TOKENS,
@@ -168,7 +131,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_tokens_per_call=config.max_tokens,
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
-        return failed_run(task_id, f"the run could not start: {unexpected}")
+        return _failed(task_id, f"the run could not start: {unexpected}")
 
 
 def main() -> None:
