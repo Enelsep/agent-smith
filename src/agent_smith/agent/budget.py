@@ -95,10 +95,13 @@ FORCED_SUBMISSION_NUDGE = (
     "Your budget for this task is nearly exhausted. This is your last turn: "
     "whatever you send now is the answer, and there will be no observation "
     "after it. Submit the best solution you already have, even if it is "
-    "unfinished. Answer with exactly this shape and nothing else:\n"
+    "unfinished. Answer with one block of exactly this shape, your own "
+    "function in place of add:\n"
     "\n"
     "```python\n"
-    "final_answer('''<the source of your function, imports included>''')\n"
+    "final_answer('''def add(a, b):\n"
+    "    return a + b\n"
+    "''')\n"
     "```<end_code>"
 )
 """What the model is told on the turn the budget guard forces.

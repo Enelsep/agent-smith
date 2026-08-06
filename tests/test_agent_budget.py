@@ -1,5 +1,7 @@
 """Pure functions deciding when the next LLM call would blow the task budget."""
 
+import ast
+
 from agent_smith.agent.budget import (
     FORCED_SUBMISSION_NUDGE,
     MIN_OUTPUT_RESERVE,
@@ -243,3 +245,15 @@ def test_the_forced_submission_nudge_asks_for_the_turn_shape_the_prompt_defined(
     assert "```python" in FORCED_SUBMISSION_NUDGE
     assert "final_answer" in FORCED_SUBMISSION_NUDGE
     assert "<end_code>" in FORCED_SUBMISSION_NUDGE
+
+
+def test_the_nudge_example_is_a_call_the_model_can_copy_verbatim() -> None:
+    # A pseudo-placeholder inside the triple quotes is something the model has
+    # to substitute while it is out of budget and on its last turn. Task 260
+    # mis-nested exactly that, sending `final_answer \'\'\'(` instead of a call,
+    # and the run ended with no answer at all. The example is a real call
+    # instead, the same shape the MBPP prompt already shows for a final turn.
+    block = FORCED_SUBMISSION_NUDGE.split("```python")[1].split("```")[0]
+
+    ast.parse(block)
+    assert "<" not in block
