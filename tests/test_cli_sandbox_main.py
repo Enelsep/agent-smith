@@ -233,6 +233,21 @@ def test_the_banner_says_how_to_leave() -> None:
     assert "exit" in cli.describe(Sandbox(), [])
 
 
+def test_the_banner_carries_the_manual_for_the_connected_tools() -> None:
+    banner = cli.describe(Sandbox(), [READ_FILE])
+
+    # The signature, not just the name: what a person tries by hand here is
+    # documented exactly as the model's prompt documents it.
+    assert "## Tools" in banner
+    assert "read_file(filepath: str)" in banner
+
+
+def test_the_banner_carries_no_manual_when_no_server_is_connected() -> None:
+    # Nothing is connected, so there is nothing to document and no reason to
+    # spend four lines saying so at a prompt.
+    assert "## Tools" not in cli.describe(Sandbox(), [])
+
+
 # --------------------------------------------------------------------------
 # The MCP bridge
 # --------------------------------------------------------------------------
@@ -243,6 +258,38 @@ def test_the_bridge_discovers_the_servers_tools() -> None:
     bridge.start()
     try:
         assert [tool.name for tool in bridge.tool_defs] == ["read_file"]
+    finally:
+        bridge.close()
+
+
+def test_the_bridge_builds_the_manual_when_it_connects() -> None:
+    bridge = MCPBridge(FakeMCPClient())
+    assert "No MCP server is connected" in bridge.manual  # before connecting
+
+    bridge.start()
+    try:
+        assert "read_file(filepath: str)" in bridge.manual
+    finally:
+        bridge.close()
+
+
+def test_a_different_server_produces_a_different_manual() -> None:
+    # The manual is rebuilt from whatever `list_tools()` returned, so an
+    # unknown server documents itself with no code change here.
+    other = MCPToolDefinition(
+        name="summon_kraken",
+        description="Summon a kraken.",
+        input_schema={
+            "type": "object",
+            "properties": {"depth": {"type": "number"}},
+            "required": ["depth"],
+        },
+    )
+    bridge = MCPBridge(FakeMCPClient(tools=[other]))
+    bridge.start()
+    try:
+        assert "summon_kraken(depth: float)" in bridge.manual
+        assert "read_file" not in bridge.manual
     finally:
         bridge.close()
 
