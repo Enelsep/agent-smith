@@ -12,8 +12,15 @@ from typing import Any
 # ------------------------------------------------------------------------------
 # Subprocess Test Execution Helper
 # ------------------------------------------------------------------------------
-def _run_tests(code: str, test_cases: str, timeout: float) -> dict[str, Any]:
-    script_content = f"{code}\n\n# --- TEST CASES ---\n{test_cases}\n"
+def _run_tests(
+    code: str, test_cases: str | list[str], timeout: float
+) -> dict[str, Any]:
+    if isinstance(test_cases, list):
+        formatted_tests = "\n".join(str(tc) for tc in test_cases)
+    else:
+        formatted_tests = str(test_cases)
+
+    script_content = f"{code}\n\n# --- TEST CASES ---\n{formatted_tests}\n"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         script_path = os.path.join(tmp_dir, "test_runner.py")
@@ -104,11 +111,17 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                                 "type": "string",
                                 "description": "Python source code / solution functions.",
                             },
+                            "test_list": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "List of assertion statements (e.g., ['assert solution(1) == 2'])."
+                                ),
+                            },
                             "test_cases": {
                                 "type": "string",
                                 "description": (
-                                    "Assertion statements (e.g., `assert"
-                                    " solution(1) == 2`)."
+                                    "Assertion statements as a single string (fallback)."
                                 ),
                             },
                             "timeout": {
@@ -120,7 +133,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                                 "default": 5.0,
                             },
                         },
-                        "required": ["code", "test_cases"],
+                        "required": ["code"],
                     },
                 }
             ]
@@ -137,7 +150,20 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
         args = params.get("arguments", {}) or {}
         code = str(args.get("code", ""))
-        test_cases = str(args.get("test_cases", ""))
+
+        raw_test_list = args.get("test_list")
+        raw_test_cases = args.get("test_cases")
+
+        if raw_test_list is not None:
+            test_inputs: str | list[str] = (
+                raw_test_list
+                if isinstance(raw_test_list, list)
+                else [str(raw_test_list)]
+            )
+        elif raw_test_cases is not None:
+            test_inputs = raw_test_cases
+        else:
+            test_inputs = []
 
         raw_timeout = args.get("timeout", 5.0)
         try:
@@ -152,7 +178,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 },
             }
 
-        outcome = _run_tests(code, test_cases, timeout)
+        outcome = _run_tests(code, test_inputs, timeout)
         result = {
             "content": [
                 {
@@ -211,8 +237,8 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                             "required": True,
                         },
                         {
-                            "name": "test_cases",
-                            "description": "Test cases for the MBPP task",
+                            "name": "test_list",
+                            "description": "List of test cases for the MBPP task",
                             "required": True,
                         },
                     ],
@@ -231,12 +257,16 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
         args = params.get("arguments", {}) or {}
         task_description = str(args.get("task_description", ""))
-        test_cases = str(args.get("test_cases", ""))
+        raw_test_list = args.get("test_list") or args.get("test_cases", "")
+        if isinstance(raw_test_list, list):
+            formatted_test_list = "\n".join(str(t) for t in raw_test_list)
+        else:
+            formatted_test_list = str(raw_test_list)
 
         prompt_text = (
             f"Solve the following MBPP Python problem:\n\n"
             f"### Description:\n{task_description}\n\n"
-            f"### Test Cases:\n{test_cases}\n\n"
+            f"### Test Cases:\n{formatted_test_list}\n\n"
             f"Write the solution, test it using `run_tests`, then submit via `final_answer`."
         )
 
