@@ -13,14 +13,30 @@ from typing import Any
 # Subprocess Test Execution Helper
 # ------------------------------------------------------------------------------
 def _run_tests(
-    code: str, test_cases: str | list[str], timeout: float
+    code: str,
+    test_list: list[str],
+    test_imports: list[str] | None = None,
+    timeout: float = 5.0,
 ) -> dict[str, Any]:
-    if isinstance(test_cases, list):
-        formatted_tests = "\n".join(str(tc) for tc in test_cases)
-    else:
-        formatted_tests = str(test_cases)
+    if not test_list:
+        return {
+            "success": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "error": "No test cases provided.",
+        }
 
-    script_content = f"{code}\n\n# --- TEST CASES ---\n{formatted_tests}\n"
+    imports_block = "\n".join(test_imports) if test_imports else ""
+    tests_block = "\n".join(test_list)
+
+    script_parts = []
+    if imports_block:
+        script_parts.append(f"# --- IMPORTS ---\n{imports_block}")
+    script_parts.append(code)
+    script_parts.append(f"# --- TEST CASES ---\n{tests_block}")
+
+    script_content = "\n\n".join(script_parts) + "\n"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         script_path = os.path.join(tmp_dir, "test_runner.py")
@@ -118,10 +134,11 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                                     "List of assertion statements (e.g., ['assert solution(1) == 2'])."
                                 ),
                             },
-                            "test_cases": {
-                                "type": "string",
+                            "test_imports": {
+                                "type": "array",
+                                "items": {"type": "string"},
                                 "description": (
-                                    "Assertion statements as a single string (fallback)."
+                                    "Optional list of import statements required for tests."
                                 ),
                             },
                             "timeout": {
@@ -133,7 +150,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                                 "default": 5.0,
                             },
                         },
-                        "required": ["code"],
+                        "required": ["code", "test_list"],
                     },
                 }
             ]
@@ -152,18 +169,22 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
         code = str(args.get("code", ""))
 
         raw_test_list = args.get("test_list")
-        raw_test_cases = args.get("test_cases")
+        if not isinstance(raw_test_list, list):
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params: 'test_list' must be a list of strings",
+                },
+            }
+        test_list = [str(x) for x in raw_test_list]
 
-        if raw_test_list is not None:
-            test_inputs: str | list[str] = (
-                raw_test_list
-                if isinstance(raw_test_list, list)
-                else [str(raw_test_list)]
-            )
-        elif raw_test_cases is not None:
-            test_inputs = raw_test_cases
+        raw_test_imports = args.get("test_imports", [])
+        if isinstance(raw_test_imports, list):
+            test_imports = [str(x) for x in raw_test_imports]
         else:
-            test_inputs = []
+            test_imports = [str(raw_test_imports)] if raw_test_imports else []
 
         raw_timeout = args.get("timeout", 5.0)
         try:
@@ -178,7 +199,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 },
             }
 
-        outcome = _run_tests(code, test_inputs, timeout)
+        outcome = _run_tests(code, test_list, test_imports, timeout)
         result = {
             "content": [
                 {
@@ -241,6 +262,11 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                             "description": "List of test cases for the MBPP task",
                             "required": True,
                         },
+                        {
+                            "name": "test_imports",
+                            "description": "List of required imports for the MBPP task",
+                            "required": False,
+                        },
                     ],
                 }
             ]
@@ -257,18 +283,34 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
         args = params.get("arguments", {}) or {}
         task_description = str(args.get("task_description", ""))
-        raw_test_list = args.get("test_list") or args.get("test_cases", "")
-        if isinstance(raw_test_list, list):
-            formatted_test_list = "\n".join(str(t) for t in raw_test_list)
-        else:
-            formatted_test_list = str(raw_test_list)
 
-        prompt_text = (
-            f"Solve the following MBPP Python problem:\n\n"
-            f"### Description:\n{task_description}\n\n"
-            f"### Test Cases:\n{formatted_test_list}\n\n"
-            f"Write the solution, test it using `run_tests`, then submit via `final_answer`."
+        raw_test_list = args.get("test_list", [])
+        if isinstance(raw_test_list, list):
+            test_list = [str(t) for t in raw_test_list]
+        else:
+            test_list = [str(raw_test_list)] if raw_test_list else []
+
+        raw_test_imports = args.get("test_imports", [])
+        if isinstance(raw_test_imports, list):
+            test_imports = [str(i) for i in raw_test_imports]
+        else:
+            test_imports = [str(raw_test_imports)] if raw_test_imports else []
+
+        prompt_parts = [
+            f"Solve the following MBPP Python problem:\n\n### Description:\n{task_description}"
+        ]
+
+        if test_imports:
+            prompt_parts.append("### Test Imports:\n" + "\n".join(test_imports))
+
+        if test_list:
+            prompt_parts.append("### Test Cases:\n" + "\n".join(test_list))
+
+        prompt_parts.append(
+            "Write the solution, test it using `run_tests`, then submit via `final_answer`."
         )
+
+        prompt_text = "\n\n".join(prompt_parts)
 
         result = {
             "description": "Solve MBPP Task Prompt",
