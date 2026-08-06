@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_smith.cli.mbpp import main as cli
+from agent_smith.cli.mbpp import prompt as prompt_module
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
@@ -89,6 +90,24 @@ def test_the_system_prompt_quotes_the_sandbox_allowlist() -> None:
 
     assert "math" in prompt
     assert "collections.*" in prompt
+
+
+def test_the_prompt_file_may_carry_braces_of_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The point of holding the prompt in a file is that its wording can be
+    # revised without touching Python. An example carrying a dict literal is
+    # ordinary prompt material, so it must reach the model as written rather
+    # than being read as a field to substitute.
+    monkeypatch.setattr(
+        prompt_module,
+        "load_prompt",
+        lambda name: "Only these: {imports}. Example: counts = {'a': 1}",
+    )
+
+    built = build_system_prompt(["math"])
+
+    assert built == "Only these: math. Example: counts = {'a': 1}"
 
 
 def test_the_system_prompt_names_the_delimiter_the_stack_agrees_on() -> None:

@@ -5,8 +5,10 @@ Stop the model spending a whole task's output budget on reasoning it never turns
 ## What this delivers
 
 `src/agent_smith/prompts/mbpp.md` and `src/agent_smith/prompts/swebench.md`, both loaded at
-runtime, and a per-call token ceiling in `models.json` that makes a runaway turn structurally
-impossible.
+runtime, and an MBPP prompt whose every turn is a code block.
+
+The per-call token ceiling this document also designs is **not** part of what ships. See the
+section on it below for what the measurement said once it was taken.
 
 ## The measurement that drives it
 
@@ -73,7 +75,21 @@ mechanism that let a stale installed copy of `mcp_tools_swebench.py` shadow the 
 file and produce a failure that looked like a defect in someone's branch. The packaging trap is
 avoidable and worth avoiding.
 
-## The per-call ceiling
+## The per-call ceiling — designed, measured, dropped
+
+**This section is kept for its reasoning, not as a description of the code. Do not implement
+it.** Two things it asserts turned out to be false, and both were only discoverable by
+measuring:
+
+- **The distribution below is wrong.** Ten turns did land between 400 and 1 500 tokens. A cap
+  at 400 truncated every one of them, all of which had been producing code.
+- **A per-call cap cannot do this job at all.** The MBPP output budget of 1 500 tokens is
+  cumulative over the whole task, so no cap loose enough to spare real code turns can hold a
+  runaway task under it. The guard that can is the cumulative one CORE-5 already shipped;
+  putting the exam ceilings back in the MBPP CLI is MBPP-3.
+
+`docs/core6-measurement.md` carries both findings. What follows is the argument as it stood
+before the measurement.
 
 `models.json` drops `max_tokens` from 1 500 to 400 for every model in the catalogue.
 

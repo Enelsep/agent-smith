@@ -1,9 +1,15 @@
 """The prompt files, and the loader that reads them out of the package."""
 
+from pathlib import Path
+
 import pytest
 
 from agent_smith.agent.budget import CHARS_PER_TOKEN
+from agent_smith.cli.mbpp.prompt import build_system_prompt
+from agent_smith.config.loader import load_sandbox_config
 from agent_smith.prompts import load_prompt
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MBPP_TOKEN_CEILING = 800
 """What CORE-6 allows the MBPP system prompt, in estimate_tokens' own units."""
@@ -19,9 +25,13 @@ def test_an_unknown_prompt_says_which_one_was_missing() -> None:
 
 
 def test_the_mbpp_prompt_fits_the_budget_core6_allows() -> None:
-    # Measured the way the budget guard measures, so the number here and the
-    # number the run is charged for cannot drift apart.
-    estimated = len(load_prompt("mbpp")) // CHARS_PER_TOKEN
+    # Measured on the prompt that is actually sent, not the file it is read
+    # from: `{imports}` stands for the real allowlist, which is twenty modules
+    # today and is edited independently of the prompt. Measured the way the
+    # budget guard measures, so this number and the one the run is charged for
+    # cannot drift apart.
+    sandbox = load_sandbox_config(REPO_ROOT / "sandbox_template.json")
+    estimated = len(build_system_prompt(sandbox.authorized_imports)) // CHARS_PER_TOKEN
 
     assert estimated <= MBPP_TOKEN_CEILING, f"{estimated} tokens"
 

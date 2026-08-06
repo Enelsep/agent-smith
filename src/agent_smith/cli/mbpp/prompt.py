@@ -20,8 +20,13 @@ def build_system_prompt(authorized_imports: Sequence[str]) -> str:
     The list is passed in rather than hardcoded so it cannot drift from
     `sandbox_template.json`: a model told it may import something the sandbox
     refuses spends an iteration finding out.
+
+    Substituted rather than formatted: the prompt is a file so that its wording
+    can be revised without touching Python, and `str.format` would make every
+    brace in it a field to resolve — a dict literal in an example would raise
+    at runtime, on a change no one would think of as a code change.
     """
-    return load_prompt("mbpp").format(imports=", ".join(authorized_imports))
+    return load_prompt("mbpp").replace("{imports}", ", ".join(authorized_imports))
 
 
 def task_prompt(task: MBPPTaskInput) -> str:
