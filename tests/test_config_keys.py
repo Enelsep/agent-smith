@@ -7,7 +7,11 @@ reading `os.environ`, so every case here is a plain call with no monkeypatching.
 import pytest
 
 from agent_smith.config import ConfigError
-from agent_smith.config.keys import discover_api_keys, provider_prefix_from_url
+from agent_smith.config.keys import (
+    discover_api_keys,
+    prefixed_api_keys,
+    provider_prefix_from_url,
+)
 
 
 class TestProviderPrefixFromUrl:
@@ -129,3 +133,27 @@ class TestDiscoverApiKeys:
 
     def test_no_key_at_all_returns_an_empty_list(self) -> None:
         assert discover_api_keys("GROQ", {"PATH": "/usr/bin"}) == []
+
+
+class TestPrefixedApiKeys:
+    """The half of discovery that can name its provider.
+
+    `resolve_config` uses a non-empty result as evidence that a provider is the
+    one the caller meant, which only holds while nothing generic leaks in.
+    """
+
+    def test_it_collects_the_same_prefixed_conventions(self) -> None:
+        env = {
+            "GROQ_API_KEY": "k1",
+            "GROQ_API_KEY_2": "k2",
+            "GROQ_API_KEYS": "k3,k4",
+        }
+        assert prefixed_api_keys("GROQ", env) == ["k1", "k2", "k3", "k4"]
+
+    def test_generic_names_are_not_a_fallback_here(self) -> None:
+        assert prefixed_api_keys("GROQ", {"API_KEY": "generic"}) == []
+        assert prefixed_api_keys("GROQ", {"LLM_API_KEY": "llm-key"}) == []
+
+    def test_another_providers_keys_are_ignored(self) -> None:
+        env = {"GROQ_API_KEY": "groq-key", "OPENROUTER_API_KEY": "or-key"}
+        assert prefixed_api_keys("OPENROUTER", env) == ["or-key"]

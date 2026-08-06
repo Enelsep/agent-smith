@@ -17,14 +17,17 @@ from agent_smith.config.errors import ConfigError
 from agent_smith.config.keys import (
     candidate_key_names,
     discover_api_keys,
+    prefixed_api_keys,
     provider_prefix_from_url,
 )
 from agent_smith.config.loader import load_models_config, load_sandbox_config
 from agent_smith.config.schema import ModelsConfig
 from agent_smith.models.contract import SandboxConfig
 
-# Only a convenience for development: passing --provider-url overrides it, and
-# the evaluation always passes one.
+# Consulted only when no --provider-url is given: preferred over the rest of
+# the catalogue when the environment holds keys for several providers, and the
+# one a keyless environment falls back to, so the resulting error names its
+# variables instead of whichever provider happens to be last in models.json.
 DEV_DEFAULT_PROVIDER = "groq"
 
 DEFAULT_MODELS_PATH = Path("models.json")
@@ -85,7 +88,7 @@ def resolve_config(
     catalogue = load_models_config(models_path)
 
     if provider_url is None:
-        provider_url = _dev_default_url(catalogue, models_path)
+        provider_url = _default_url(catalogue, models_path, env)
 
     base_url = provider_url
     prefix = provider_prefix_from_url(base_url)
@@ -123,11 +126,33 @@ def resolve_config(
     )
 
 
-def _dev_default_url(catalogue: ModelsConfig, models_path: Path) -> str:
-    provider = catalogue.providers.get(DEV_DEFAULT_PROVIDER)
-    if provider is None:
+def _default_url(
+    catalogue: ModelsConfig, models_path: Path, env: Mapping[str, str]
+) -> str:
+    """The endpoint to use when the caller named none, chosen from the keys.
+
+    The `.env` is written by whoever runs us — the subject's own example names
+    `OPENROUTER_API_KEY` — so a fixed default provider turns a perfectly good
+    key for another one into a fatal error before the first call. Each
+    catalogued provider is asked whether the environment carries a key under
+    its own prefix, and the first that does wins.
+
+    `DEV_DEFAULT_PROVIDER` is tried before the rest, so an environment holding
+    several keys resolves exactly as it did before this existed, and it is also
+    what a keyless environment falls back to, so the error names its variables
+    rather than the last provider in the file.
+    """
+    default = catalogue.providers.get(DEV_DEFAULT_PROVIDER)
+    if default is None:
         raise ConfigError(
             f"no --provider-url given and the development default "
             f"{DEV_DEFAULT_PROVIDER!r} is absent from {models_path}"
         )
-    return provider.base_url
+
+    candidates = [default, *catalogue.providers.values()]
+    for provider in candidates:
+        prefix = provider_prefix_from_url(provider.base_url)
+        if prefixed_api_keys(prefix, env):
+            return provider.base_url
+
+    return default.base_url
