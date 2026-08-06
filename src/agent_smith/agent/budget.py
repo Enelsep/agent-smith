@@ -92,11 +92,22 @@ def output_reserve(max_output_tokens: int) -> int:
 
 
 FORCED_SUBMISSION_NUDGE = (
-    "Your token or time budget for this task is nearly exhausted. Call "
-    "final_answer(...) now with your best current solution — this is the "
-    "last turn you will get."
+    "Your budget for this task is nearly exhausted. This is your last turn: "
+    "whatever you send now is the answer, and there will be no observation "
+    "after it. Submit the best solution you already have, even if it is "
+    "unfinished. Answer with exactly this shape and nothing else:\n"
+    "\n"
+    "```python\n"
+    "final_answer('''<the source of your function, imports included>''')\n"
+    "```<end_code>"
 )
-"""Placeholder wording. CORE-6 owns the real text for both prompts."""
+"""What the model is told on the turn the budget guard forces.
+
+Shaped like a turn rather than written as prose, because the prompts allow
+exactly one fenced code block per turn and nothing else. A prose instruction
+reads as an ordinary message and gets answered the ordinary way — with one
+more round of debugging, which is a turn the run no longer has.
+"""
 
 NUDGE_TOKENS = len(FORCED_SUBMISSION_NUDGE) // CHARS_PER_TOKEN
 """What the nudge adds to the forced request, in the estimator's own unit.

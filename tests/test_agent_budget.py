@@ -1,6 +1,7 @@
 """Pure functions deciding when the next LLM call would blow the task budget."""
 
 from agent_smith.agent.budget import (
+    FORCED_SUBMISSION_NUDGE,
     MIN_OUTPUT_RESERVE,
     MIN_VIABLE_OUTPUT_TOKENS,
     UNCALIBRATED_BILLING_RATIO,
@@ -229,3 +230,16 @@ def test_wall_clock_is_reported_ahead_of_output_tokens() -> None:
     assert (
         force_reason(elapsed_seconds=110.0, remaining_output_tokens=0) == "wall_clock"
     )
+
+
+def test_the_forced_submission_nudge_asks_for_the_turn_shape_the_prompt_defined() -> (
+    None
+):
+    # The nudge is the last thing the model reads before its final turn, and the
+    # MBPP prompt allows exactly one fenced code block per turn and nothing
+    # else. A nudge written as prose invites a prose reply, or one more round of
+    # debugging: task 260 answered a prose nudge with more code, and the run
+    # ended with no answer at all rather than with its best attempt.
+    assert "```python" in FORCED_SUBMISSION_NUDGE
+    assert "final_answer" in FORCED_SUBMISSION_NUDGE
+    assert "<end_code>" in FORCED_SUBMISSION_NUDGE
