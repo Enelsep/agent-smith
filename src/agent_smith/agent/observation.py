@@ -1,6 +1,7 @@
 """Every way a step can end, rendered as the text the model reads next."""
 
 from agent_smith.extraction import ExtractionResult
+from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 NO_OUTPUT = "The code ran and printed nothing."
@@ -19,10 +20,16 @@ EMPTY_ANSWER = (
 def from_extraction(result: ExtractionResult) -> str:
     """The observation for a reply that carried no runnable code.
 
-    CORE-3 writes its failures as messages addressed to the model, so they
-    pass through unchanged.
+    CORE-3 writes its failures as messages addressed to the model, so each is
+    handed to `feedback.no_code_block` as the reason: it keeps the extractor's
+    account of what went wrong and adds the sandbox's own voice and the way
+    out.
     """
-    return result.failure or "I could not find any code to run in your reply."
+    # A strategy that matched and then failed means the model framed the block
+    # correctly and got the contents wrong; it does not need the format list.
+    return feedback.no_code_block(
+        result.failure, saw_format=result.strategy is not None
+    )
 
 
 def from_execution(
@@ -34,11 +41,15 @@ def from_execution(
     """The observation for a step whose code reached the sandbox.
 
     The repair note leads, because it explains the code the model is about to
-    see the result of. The namespace warning trails, because it applies to
-    everything that follows rather than to this result.
+    see the result of. The truncation and namespace warnings trail, because
+    they apply to what surrounds the result rather than to the result itself.
     """
-    parts = [] if repair_note is None else [repair_note]
+    parts = [] if repair_note is None else [feedback.repaired_code(repair_note)]
     parts.append(_body(executed))
+    if executed.truncated:
+        # The worker leaves a marker inline where it cut; this says what the
+        # marker means and what to do instead of running the same thing again.
+        parts.append(feedback.output_truncated())
     if namespace_lost:
         parts.append(NAMESPACE_LOST)
     return "\n\n".join(parts)
@@ -72,5 +83,10 @@ def _body(executed: ExecResult) -> str:
     printed = combined_output(executed)
     if executed.outcome is Outcome.OK:
         return printed or NO_OUTPUT
+    if executed.outcome is Outcome.SOFT_TIMEOUT:
+        # The worker's own error line says the limit was exceeded. What the
+        # model actually needs is that the output above stops mid-run.
+        cut = feedback.partial_output(printed=bool(printed))
+        return f"{printed}\n\n{cut}" if printed else cut
     detail = executed.error or f"The sandbox reported {executed.outcome.value}."
     return f"{printed}\n\n{detail}" if printed else detail

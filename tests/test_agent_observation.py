@@ -4,16 +4,19 @@ import pytest
 
 from agent_smith.agent import observation
 from agent_smith.extraction import ExtractionResult
+from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 
 def test_a_reply_with_no_code_reports_what_extraction_said() -> None:
+    # The extractor's own account is kept -- it is the part that tells the
+    # model what to change -- and wrapped in the sandbox's standard notice.
     result = ExtractionResult(failure="Could not read your reply: no code block.")
 
-    assert (
-        observation.from_extraction(result)
-        == "Could not read your reply: no code block."
-    )
+    said = observation.from_extraction(result)
+
+    assert "Could not read your reply: no code block" in said
+    assert said.startswith(feedback.PREFIX)
 
 
 def test_output_that_printed_something_is_shown_as_is() -> None:
@@ -54,7 +57,10 @@ def test_a_soft_timeout_keeps_the_partial_output_and_names_the_cause() -> None:
     said = observation.from_execution(executed)
 
     assert "partial" in said
-    assert "exceeded the sandbox time limit" in said
+    # What the model needs is not that a limit exists but that the output
+    # above stops mid-run; `feedback.partial_output` says so.
+    assert "time limit" in said
+    assert "incomplete" in said
 
 
 @pytest.mark.parametrize(
@@ -81,10 +87,12 @@ def test_a_repair_is_reported_so_the_model_stops_repeating_it() -> None:
     executed = ExecResult(outcome=Outcome.OK, stdout="fine\n")
 
     said = observation.from_execution(
-        executed, repair_note="Your code block was unclosed; I closed it."
+        executed, repair_note="closed an unterminated string or bracket"
     )
 
-    assert said.startswith("Your code block was unclosed; I closed it.")
+    # The explanation leads, because it describes the code whose result follows.
+    assert said.startswith(feedback.PREFIX)
+    assert "closed an unterminated string or bracket" in said
     assert "fine" in said
 
 

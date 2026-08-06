@@ -6,10 +6,9 @@ from agent_smith.extraction.repair import repair_python
 from agent_smith.extraction.result import ExtractionResult, Strategy
 from agent_smith.extraction.strategies import STRATEGY_CHAIN, Candidate, PayloadError
 
-_NOTHING_MATCHED = (
-    "No code found in your reply. Send a ```python fenced block, an <invoke> block, "
-    "a <tool_call> block, or an Action: / Action Input: pair."
-)
+# The diagnosis only. What to send instead is `sandbox.feedback.no_code_block`'s
+# to say, so the instruction is worded in one place and cannot be given twice.
+_NOTHING_MATCHED = "No code block was found in your reply"
 
 
 def extract_code(text: str, *, step: int) -> ExtractionResult:
