@@ -103,7 +103,7 @@ class MCPBridge:
             return f"Observation: the MCP session ended before '{name}' could run."
 
         try:
-            return answer.result(timeout=5.0)
+            return answer.result(timeout=600.0)
         except Exception as failed:  # noqa: BLE001 - a broken tool is an observation
             return f"Observation: tool '{name}' failed: {failed}"
 
