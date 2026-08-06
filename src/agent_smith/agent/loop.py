@@ -227,11 +227,12 @@ class _Run:
                         "remained, too few to attempt a final answer"
                     )
                     return
-                # Added to the view, not to the transcript. The forced
-                # iteration is the last one, so nothing reads this message
-                # back, and it keeps `compact` to one call per iteration:
-                # CORE-7 need not be idempotent, nor preserve the last
-                # message it is handed.
+                # Added to the view, not to the transcript: the nudge is about
+                # this call, and a forced turn may be followed by another one.
+                # Keeping it out of the history means it is never read back as
+                # part of the conversation, and it keeps `compact` to one call
+                # per iteration — CORE-7 need not be idempotent, nor preserve
+                # the last message it is handed.
                 view = [*view, {"role": "user", "content": FORCED_SUBMISSION_NUDGE}]
             try:
                 answer = provider.complete(
@@ -276,12 +277,24 @@ class _Run:
                     repair_note=extracted.repair_note,
                 )
                 self._record(step, answer, extracted.code, said)
-            if reason is not None:
+            if reason == "wall_clock":
+                # The one budget that cannot be reserved against. `can_afford_
+                # forced_call` and `can_attempt_submission` let a token stop be
+                # retried because both are measurable before the call; how long
+                # a request will take is not knowable until it returns, so a
+                # second attempt here is a bet against the only ceiling with no
+                # way to check it first.
                 self.error = (
-                    f"stopped by the {reason} budget guard at step {step}; "
+                    f"stopped by the wall_clock budget guard at step {step}; "
                     "no final answer was received"
                 )
                 return
+            # A forced turn that answered nothing usable is not the end of a
+            # run stopped for tokens: the observation about to be appended is
+            # what would fix the next attempt — a block that did not parse says
+            # so — and the two affordability checks at the top of the next
+            # iteration decide whether there is budget left to try again.
+            # Returning here would discard both while the ceiling still had room.
             self.history.append({"role": "user", "content": said})
         self.error = (
             f"the agent used all {max_iterations} iterations without calling "
