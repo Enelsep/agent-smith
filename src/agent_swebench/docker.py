@@ -37,7 +37,12 @@ class DockerManager:
     # ------------------------------------------------------------------
     @classmethod
     def sweep_orphans(cls) -> None:
-        """Cleans up orphan containers remaining active from a previous crash."""
+        """Cleans up orphan containers remaining active from a previous crash.
+
+        Note: Assumes exclusive ownership of the CONTAINER_LABEL on this machine.
+        Should only be used in single-run environments where no concurrent
+        benchmark tasks share this label.
+        """
         logger.info("Sweeping orphan Docker containers...")
         try:
             cmd = ["docker", "ps", "-aq", "--filter", f"label={CONTAINER_LABEL}"]
@@ -156,6 +161,7 @@ class DockerManager:
         if code == 0 and path:
             return path
 
+        logger.info("TESTBED_PATH variable not found; falling back to /testbed")
         return "/testbed"
 
     def cleanup(self) -> None:

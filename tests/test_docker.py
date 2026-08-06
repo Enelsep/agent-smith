@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from agent_swebench.docker import CONTAINER_LABEL, DockerManager
 
@@ -35,6 +38,16 @@ def test_docker_manager_context_manager() -> None:
         # Cleanup must be executed when exiting the with block
         assert mgr.container_id is None
 
+        # Verify docker rm -f was actually called
+        rm_calls = [
+            call[0][0]
+            for call in mock_run.call_args_list
+            if call[0][0][:3] == ["docker", "rm", "-f"]
+        ]
+        assert any(
+            "container_id_123" in cmd or "test-container" in cmd for cmd in rm_calls
+        )
+
 
 def test_docker_manager_exec() -> None:
     mgr = DockerManager("test-image:latest", "test-container")
@@ -52,7 +65,7 @@ def test_docker_manager_exec() -> None:
         assert "-e" in cmd_args and "FOO=BAR" in cmd_args
 
 
-def test_locate_testbed() -> None:
+def test_locate_testbed_success() -> None:
     mgr = DockerManager("test-image:latest", "test-container")
     mgr.container_id = "cid123"
 
@@ -60,3 +73,83 @@ def test_locate_testbed() -> None:
         mock_exec.return_value = (0, "/custom/testbed\n", "")
         path = mgr.locate_testbed()
         assert path == "/custom/testbed"
+
+
+def test_locate_testbed_fallback_logging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec, caplog.at_level("INFO"):
+        mock_exec.return_value = (0, "", "")
+        path = mgr.locate_testbed()
+        assert path == "/testbed"
+        assert "falling back to /testbed" in caplog.text
+
+
+def test_start_rollback_on_docker_run_failure() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+
+    with (
+        patch("subprocess.run") as mock_run,
+        patch.object(mgr, "cleanup") as mock_cleanup,
+    ):
+        mock_run.side_effect = [
+            MagicMock(stdout="", returncode=0),  # sweep_orphans
+            MagicMock(returncode=0),  # preventive removal
+            MagicMock(returncode=0),  # docker pull
+            RuntimeError("Docker run failed"),  # docker run exception
+        ]
+
+        with pytest.raises(RuntimeError, match="Docker run failed"):
+            mgr.start()
+
+        mock_cleanup.assert_called_once()
+
+
+def test_exec_timeout_expired_bytes_and_str() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    # Case 1: TimeoutExpired with bytes
+    with patch("subprocess.run") as mock_run:
+        exc = subprocess.TimeoutExpired(
+            cmd="echo hi",
+            timeout=5.0,
+            output=b"partial stdout",
+            stderr=b"partial stderr",
+        )
+        mock_run.side_effect = exc
+
+        code, out, err = mgr.exec("echo hi", timeout=5.0)
+        assert code == -1
+        assert out == "partial stdout"
+        assert err == "partial stderr"
+
+    # Case 2: TimeoutExpired with str / None
+    with patch("subprocess.run") as mock_run:
+        exc = subprocess.TimeoutExpired(
+            cmd="echo hi",
+            timeout=5.0,
+            output="partial str stdout",
+            stderr=None,
+        )
+        mock_run.side_effect = exc
+
+        code, out, err = mgr.exec("echo hi", timeout=5.0)
+        assert code == -1
+        assert out == "partial str stdout"
+        assert "Execution timed out after 5.0 seconds." in err
+
+
+def test_atexit_handler_registration_and_cleanup() -> None:
+    with (
+        patch("atexit.register") as mock_register,
+        patch("atexit.unregister") as mock_unregister,
+    ):
+        mgr = DockerManager("test-image:latest", "test-container")
+        mock_register.assert_called_once_with(mgr._atexit_handler)
+
+        mgr.cleanup()
+        mock_unregister.assert_called_once_with(mgr._atexit_handler)
