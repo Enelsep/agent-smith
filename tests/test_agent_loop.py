@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import pytest
 
 from agent_smith.agent import budget, observation
+from agent_smith.agent.history import TRUNCATION_MARKER
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.llm import LLMResponse, Message, ProviderError
@@ -1045,3 +1046,23 @@ def test_the_result_of_a_real_run_satisfies_the_contract() -> None:
 
     assert sandbox.received == ["result = 1 + 1\nprint(result)"]
     assert SolutionOutput.model_validate_json(solution.model_dump_json()) == solution
+
+
+def test_a_caller_who_says_nothing_still_gets_a_flat_transcript() -> None:
+    # The reasoning behind DEFAULT_MAX_ITERATIONS applies to compaction too:
+    # a caller who forgets must not be able to invalidate a run silently.
+    provider = FakeProvider(
+        [
+            a_response("Thought: one\n```python\nprint(1)\n```"),
+            a_response("Thought: two\n```python\nprint(2)\n```"),
+            a_response("```python\nfinal_answer('done')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([ok("1"), ok("2"), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    third_call = provider.calls[2]
+    assert TRUNCATION_MARKER in third_call[2]["content"]
+    assert "Thought: one" not in third_call[2]["content"]
+    assert "Thought: two" in third_call[4]["content"]

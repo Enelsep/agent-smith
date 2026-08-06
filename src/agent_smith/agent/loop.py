@@ -18,6 +18,7 @@ from agent_smith.agent.budget import (
     remaining_output_tokens,
     should_force_submission,
 )
+from agent_smith.agent.history import compact_history
 from agent_smith.extraction import extract_code
 from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput, StepMetrics
@@ -66,18 +67,13 @@ class Sandbox(Protocol):
     def execute(self, code: str) -> ExecResult: ...
 
 
-def _unchanged(messages: list[Message]) -> list[Message]:
-    """The CORE-7 seam, until CORE-7 fills it."""
-    return messages
-
-
 def run_task(
     task: TaskSpec,
     provider: LLMProvider,
     sandbox: Sandbox,
     *,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
-    compact: Callable[[list[Message]], list[Message]] = _unchanged,
+    compact: Callable[[list[Message]], list[Message]] = compact_history,
     clock: Callable[[], float] = time.monotonic,
     max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
@@ -98,6 +94,13 @@ def run_task(
     cumulative output budget drains but never raises it, so a model configured
     to answer in 400 tokens is not handed 1 500 on the first step. `None`
     leaves the provider's own default in force.
+
+    The transcript sent to the provider is compacted by default, via
+    `compact_history` at its default `verbatim_steps`: older steps keep the
+    code that ran and lose the reasoning that led there, so a long task does
+    not pay to re-send its own past in full on every call. A caller with a
+    different budget passes its own callable, such as
+    `functools.partial(compact_history, verbatim_steps=N)`.
     """
     run = _Run(task, clock)
     try:
