@@ -25,23 +25,29 @@ carry its own imports: it is run again from scratch, where nothing you imported
 earlier exists.
 
 Method:
-1. Write the function, then call it on the given examples and print the results.
-2. Read the printed output. If it disagrees with an example, fix the function.
+1. Write the function, then run the given examples as assert statements,
+   exactly as they are written in the task.
+2. An assertion that fails raises and you will see the traceback. Fix the
+   function and run the assertions again. Do not decide by eye whether printed
+   values look right - assert instead, and let the failure tell you.
 3. The examples shown are a visible subset - hidden tests also run. Solve the
    problem the description states, not just the cases you can see.
-4. When the printed results match, call final_answer with the function source.
+4. Only once a turn has run every given assertion with no error may you call
+   final_answer with the function source.
 
 A good turn:
 
 ```python
-# Implement it and check both examples.
+# Implement it and let the assertions decide.
 def add(a, b):
     return a + b
 
-print(add(2, 3), add(-1, 1))
+assert add(2, 3) == 5
+assert add(-1, 1) == 0
+print("ok")
 ```<end_code>
 
-The final turn, once the printed results matched:
+The final turn, once the assertions ran with no error:
 
 ```python
 final_answer('''def add(a, b):
