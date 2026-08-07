@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -96,8 +97,25 @@ def _failed(task_id: str, error: str) -> SolutionOutput:
     return failed_run(BENCHMARK, task_id, error)
 
 
+def remaining_wall_clock(spent_seconds: float) -> float:
+    """What is left of the 900 seconds once `spent_seconds` are gone.
+
+    The limit is on the task, not on the loop. Pulling a SWE-bench image and
+    starting its container is part of solving the task and can run to minutes,
+    all of it before `run_task` sees anything — so the loop is handed the
+    remainder rather than the whole. Never negative: a setup that already
+    overran hands zero, which the guard reads as no budget left rather than as
+    an unlimited one.
+    """
+    return max(0.0, MAX_WALL_CLOCK_SECONDS - spent_seconds)
+
+
 def solve(args: argparse.Namespace) -> SolutionOutput:
     """Run one task to a solution. Never raises."""
+    # Everything below counts against the wall clock, including the image pull.
+    # Interpreter startup happens before this line and is not ours to measure;
+    # it is seconds against a ceiling of nine hundred.
+    started = time.monotonic()
     try:
         task = load_task(args.task_file)
     except ConfigError as unusable:
@@ -156,7 +174,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_iterations=args.max_iterations,
                 max_input_tokens=MAX_INPUT_TOKENS,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-                max_wall_clock_seconds=MAX_WALL_CLOCK_SECONDS,
+                max_wall_clock_seconds=remaining_wall_clock(time.monotonic() - started),
                 max_tokens_per_call=config.max_tokens,
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point

@@ -96,7 +96,11 @@ class TestTheRun:
         assert seen["max_iterations"] == 30
         assert seen["max_input_tokens"] == 300_000
         assert seen["max_output_tokens"] == 10_000
-        assert seen["max_wall_clock_seconds"] == 900.0
+        # The wall clock is the one the loop does not receive whole: setting up
+        # the container spends it too, so what is left is covered by
+        # `test_the_setup_time_is_taken_out_of_the_wall_clock`. The ceiling
+        # itself is asserted here, with the other three.
+        assert cli.MAX_WALL_CLOCK_SECONDS == 900.0
 
     def test_the_tools_are_reached_inside_the_container(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -110,6 +114,21 @@ class TestTheRun:
         assert command == "docker"
         assert args[:2] == ["exec", "-i"]
         assert "cid-123" in args
+
+    def test_the_setup_time_is_taken_out_of_the_wall_clock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `total_time_seconds` covers the whole command, so pulling the image
+        # spends the same 900 seconds the loop would otherwise think it has.
+        seen = budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        assert 0.0 < seen["max_wall_clock_seconds"] <= 900.0
+
+    def test_a_setup_longer_than_the_ceiling_leaves_no_budget(self) -> None:
+        # A pull that overran must hand the loop zero, not a negative budget the
+        # guard would read as unlimited.
+        assert cli.remaining_wall_clock(1_000.0) == 0.0
+        assert cli.remaining_wall_clock(60.0) == 840.0
 
     def test_the_package_the_server_imports_travels_with_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
