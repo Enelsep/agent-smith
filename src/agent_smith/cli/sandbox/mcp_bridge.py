@@ -1,17 +1,3 @@
-"""Driving an asynchronous MCP client from the synchronous prompt.
-
-`Sandbox` calls its tool handler synchronously, in the parent process, while
-the worker sits blocked on the pipe waiting for the answer. Every MCP client we
-have is asynchronous, and the stdio transport builds its task group inside the
-task that connected it -- so the connect, every call and the disconnect have to
-happen in that one task, not merely on the same event loop. Exiting that group
-from a second task is what raises anyio's "cancel scope in a different task".
-
-This runs the whole session as a single coroutine on a private thread and posts
-work to it through a queue. What comes back out is an ordinary blocking method,
-which is exactly what `Sandbox(tool_handler=...)` wants.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -142,8 +128,6 @@ class MCPBridge:
             await self._disconnect()
             return
 
-        # Rebuilt here, from this server's schemas, every time a session
-        # connects: that is what documents an unknown server automatically.
         self.tool_defs = registry.get_tool_definitions()
         self.manual = to_sandbox_manual(self.tool_defs)
         self._ready.set()

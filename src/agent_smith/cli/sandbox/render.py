@@ -1,13 +1,3 @@
-"""Turning an `ExecResult` into the text a person reads at the prompt.
-
-`agent.observation` renders the same object for the model. The two differ on
-purpose: the model is given prose it can act on, while a person at a terminal
-wants their program's output exactly as it was written. So the streams pass
-through untouched here, and every word the sandbox adds of its own carries the
-`sandbox:` marker -- otherwise there is no way to tell a refusal from something
-the code printed itself.
-"""
-
 from __future__ import annotations
 
 from agent_smith.sandbox.protocol import ExecResult, Outcome
