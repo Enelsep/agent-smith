@@ -1122,3 +1122,87 @@ def test_a_forced_turn_that_answers_nothing_is_tried_again_while_budget_allows()
     assert nudged == [2, 3], f"expected two forced attempts, got {nudged}"
     assert result.success is True
     assert result.solution == "done"
+
+
+def test_a_submission_the_validator_rejects_does_not_end_the_run() -> None:
+    # The prompt asks the model to run the assertions before submitting;
+    # nothing makes it. Task 84 read `1 1` where the test wanted `1 2`, called
+    # that a match and submitted. A harness that checks the answer itself holds
+    # whatever the model believes.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+    rejected: list[str] = []
+
+    def validate(submitted: str) -> str | None:
+        rejected.append(submitted)
+        return None if submitted == "right" else "it failed the given tests"
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), validate_answer=validate
+    )
+
+    assert rejected == ["wrong", "right"]
+    assert solution.success is True
+    assert solution.solution == "right"
+    assert solution.iterations == 2
+
+
+def test_the_rejection_is_what_the_model_reads_next() -> None:
+    # A rejection the model never sees is a wasted iteration: it would submit
+    # the same answer again.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        validate_answer=lambda s: None if s == "right" else "assert add(1, 2) failed",
+    )
+
+    second_call = provider.calls[1]
+    assert "assert add(1, 2) failed" in second_call[-1]["content"]
+
+
+def test_without_a_validator_a_submission_is_taken_as_given() -> None:
+    # The default has to stay what every existing caller relies on.
+    provider = FakeProvider([a_response("```python\nfinal_answer('whatever')\n```")])
+    sandbox = FakeSandbox([answered("whatever")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is True
+    assert solution.solution == "whatever"
+
+
+def test_a_rejected_submission_is_recorded_as_the_step_that_it_was() -> None:
+    # The metrics must show the submission that was refused, not a gap.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        validate_answer=lambda s: None if s == "right" else "no",
+    )
+
+    assert solution.steps[0].sandbox_input == "final_answer('wrong')"
+    assert solution.steps[0].sandbox_output == "no"

@@ -13,6 +13,7 @@ from agent_smith.cli.mbpp import prompt as prompt_module
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
+from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 A_TASK = MBPPTaskInput(
     task_id=11,
@@ -254,3 +255,68 @@ def test_the_model_pair_is_optional() -> None:
 def test_the_task_file_and_output_are_required() -> None:
     with pytest.raises(SystemExit):
         cli.parse_args(["--output", "s.json"])
+
+
+class TestTheSubmissionIsChecked:
+    """`build_validator` runs the task's own assertions against a submission."""
+
+    def a_sandbox(self, script: list[object]) -> object:
+        class Sandbox:
+            def __init__(self) -> None:
+                self.ran: list[str] = []
+                self.restarts = 0
+
+            def execute(self, code: str):  # type: ignore[no-untyped-def]
+                self.ran.append(code)
+                return script.pop(0)
+
+        return Sandbox()
+
+    def test_a_submission_that_passes_the_given_tests_is_accepted(self) -> None:
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")])
+
+        validate = cli.build_validator(A_TASK, sandbox)  # type: ignore[arg-type]
+
+        assert validate("def remove_Occ(s, ch): return s") is None
+
+    def test_the_submitted_source_runs_with_the_task_s_own_assertions(self) -> None:
+        # Not the code the model happened to run: the string it submitted, which
+        # is what the grader will run, and the assertions exactly as given.
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")])
+
+        cli.build_validator(A_TASK, sandbox)("def remove_Occ(s, ch): return s")  # type: ignore[arg-type]
+
+        ran = sandbox.ran[0]  # type: ignore[attr-defined]
+        assert "def remove_Occ(s, ch): return s" in ran
+        assert 'assert remove_Occ("hello", "l") == "heo"' in ran
+        assert "import math" in ran
+
+    def test_a_failing_assertion_is_refused_and_quoted_back(self) -> None:
+        sandbox = self.a_sandbox(
+            [
+                ExecResult(
+                    outcome=Outcome.ERROR,
+                    stderr="AssertionError",
+                    error="AssertionError",
+                )
+            ]
+        )
+
+        refusal = cli.build_validator(A_TASK, sandbox)(
+            "def remove_Occ(s, ch): return s"
+        )  # type: ignore[arg-type]
+
+        assert refusal is not None
+        assert "AssertionError" in refusal
+
+    def test_a_task_with_no_visible_tests_accepts_whatever_it_is_given(self) -> None:
+        # Nothing to check against, so there is nothing to refuse on -- and
+        # running the source alone would reject a perfectly good answer for
+        # printing nothing.
+        bare = MBPPTaskInput(
+            task_id=1, task_definition="Add.", function_definition="def add(a, b):"
+        )
+        sandbox = self.a_sandbox([])
+
+        assert cli.build_validator(bare, sandbox)("def add(a, b): return a + b") is None  # type: ignore[arg-type]
+        assert sandbox.ran == []  # type: ignore[attr-defined]

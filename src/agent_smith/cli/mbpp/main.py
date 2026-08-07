@@ -13,11 +13,13 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from agent_smith.agent import observation
 from agent_smith.agent.loop import (
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_WALL_CLOCK_SECONDS,
+    AnswerValidator,
     run_task,
 )
 from agent_smith.agent.task import TaskSpec
@@ -26,6 +28,7 @@ from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError, resolve_config
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
 from agent_smith.sandbox.process import Sandbox
+from agent_smith.sandbox.protocol import Outcome
 
 BENCHMARK = "mbpp"
 
@@ -88,6 +91,38 @@ def build_task_spec(task: MBPPTaskInput, system_prompt: str) -> TaskSpec:
     )
 
 
+REFUSED = (
+    "final_answer refused: run against the task's own tests, the source you "
+    "submitted did not pass them.\n\n{failure}\n\nFix the function, run those "
+    "same assertions until they raise nothing, then submit again."
+)
+
+
+def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
+    """Refuse a submission that does not survive the task's visible tests.
+
+    The prompt asks the model to run the assertions before it submits; nothing
+    made it. So the submitted string — not the code the model happened to run
+    last — is executed here against those same assertions, which is the closest
+    this side can get to what the solution will be judged on.
+
+    A task carrying no visible tests has nothing to check against, and running
+    the source on its own would refuse a good answer for printing nothing.
+    """
+
+    def validate(submitted: str) -> str | None:
+        if not task.test_list:
+            return None
+        checked = sandbox.execute(
+            "\n".join([*task.test_imports, submitted, *task.test_list])
+        )
+        if checked.outcome is Outcome.OK:
+            return None
+        return REFUSED.format(failure=observation.from_execution(checked))
+
+    return validate
+
+
 def solve(args: argparse.Namespace) -> SolutionOutput:
     """Run one task to a solution. Never raises."""
     try:
@@ -129,6 +164,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS,
                 max_tokens_per_call=config.max_tokens,
+                validate_answer=build_validator(task, sandbox),
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return _failed(task_id, f"the run could not start: {unexpected}")
