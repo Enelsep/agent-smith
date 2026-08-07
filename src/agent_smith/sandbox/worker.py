@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import resource
 import signal
 import time
 import traceback
@@ -17,21 +18,7 @@ from .protocol import (
     ToolCall,
     ToolReply,
 )
-from .security import (
-    AttributeBlockedError,
-    FilesystemPolicy,
-    ImportBlockedError,
-    ImportGuard,
-    NetworkBlockedError,
-    PathBlockedError,
-    ProcessBlockedError,
-    apply_memory_limit,
-    build_sandbox_builtins,
-    enforcement,
-    install_audit_hook,
-    scan_for_escapes,
-    suspended,
-)
+from .security import SandboxBlocked, SandboxPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -58,19 +45,20 @@ def _on_alarm(signum: int, frame: FrameType | None) -> NoReturn:
     raise TimeoutError("Execution exceeded the sandbox time limit")
 
 
-def _make_tool_bridge(conn: WorkerConn) -> Callable[[str, dict[str, Any]], str]:
+def _make_tool_bridge(
+    conn: WorkerConn, policy: SandboxPolicy
+) -> Callable[[str, dict[str, Any]], str]:
     """Build the function the injected tool stubs call to reach the parent.
 
-    Waiting on the parent is not the sandboxed code running, so two things pause
-    for the round trip: the execution timer, because the subject says MCP server
-    work is not subject to the sandbox timeout; and the audit hook, because the
-    pipe traffic here is ours, not the model's.
+    The timer and the policy both pause for the round trip: the subject says
+    MCP server work is not subject to the sandbox timeout, and the pipe
+    traffic here is the worker's own, not the model's.
     """
 
     def request(name: str, arguments: dict[str, Any]) -> str:
         remaining, _ = signal.setitimer(signal.ITIMER_REAL, 0)
         try:
-            with suspended():
+            with policy.suspended():
                 conn.send(ToolCall(name=name, arguments=arguments))
                 reply = conn.recv()
         finally:
@@ -85,7 +73,7 @@ def _make_tool_bridge(conn: WorkerConn) -> Callable[[str, dict[str, Any]], str]:
 
 
 def _build_namespace(
-    guard: ImportGuard,
+    policy: SandboxPolicy,
     tool_defs: Sequence[MCPToolDefinition] = (),
     conn: WorkerConn | None = None,
 ) -> dict[str, Any]:
@@ -100,19 +88,21 @@ def _build_namespace(
 
     namespace: dict[str, Any] = {
         "__name__": "__sandbox__",
-        "__builtins__": build_sandbox_builtins(guard),
+        "__builtins__": policy.builtins(),
         "final_answer": final_answer,
     }
     if tool_defs and conn is not None:
         namespace.update(
-            get_sandbox_tool_stubs(list(tool_defs), _make_tool_bridge(conn))
+            get_sandbox_tool_stubs(list(tool_defs), _make_tool_bridge(conn, policy))
         )
     return namespace
 
 
-def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecResult:
+def _execute_once(
+    code: str, namespace: dict[str, Any], timeout: float, policy: SandboxPolicy
+) -> ExecResult:
     """Run one code block in the shared namespace and describe what happened"""
-    violation = scan_for_escapes(code)
+    violation = policy.check_code(code)
     if violation is not None:
         return ExecResult(outcome=Outcome.BLOCKED, error=violation)
     out_buf, err_buf = io.StringIO(), io.StringIO()
@@ -127,7 +117,7 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
         with (
             contextlib.redirect_stdout(out_buf),
             contextlib.redirect_stderr(err_buf),
-            enforcement(),
+            policy.enforcing(),
         ):
             exec(code, namespace)  # noqa: S102
 
@@ -143,13 +133,7 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
         outcome = Outcome.SHUTDOWN
         error = f"{type(exc).__name__}: {exc}"
 
-    except (
-        ImportBlockedError,
-        AttributeBlockedError,
-        PathBlockedError,
-        NetworkBlockedError,
-        ProcessBlockedError,
-    ) as exc:
+    except SandboxBlocked as exc:
         outcome = Outcome.BLOCKED
         error = str(exc)
 
@@ -196,12 +180,18 @@ def worker_main(
     startup allocations are not counted against the sandbox's budget.
     """
     signal.signal(signal.SIGALRM, _on_alarm)
-    guard = ImportGuard(authorized_imports)
-    namespace = _build_namespace(guard, tool_defs, conn)
 
-    policy = FilesystemPolicy.build(allowed_directories)
-    install_audit_hook(policy)
-    apply_memory_limit(max_memory_mb)
+    policy = SandboxPolicy(authorized_imports, allowed_directories)
+    namespace = _build_namespace(policy, tool_defs, conn)
+    policy.install()
+    max_bytes = max_memory_mb * 1024 * 1024
+    for limit in (resource.RLIMIT_AS, resource.RLIMIT_DATA):
+        with contextlib.suppress(ValueError, OSError):
+            _soft, hard = resource.getrlimit(limit)
+            ceiling = (
+                max_bytes if hard == resource.RLIM_INFINITY else min(max_bytes, hard)
+            )
+            resource.setrlimit(limit, (ceiling, ceiling))
 
     while True:
         try:
@@ -212,6 +202,6 @@ def worker_main(
             break
         if not isinstance(request, ExecRequest):
             continue
-        conn.send(_execute_once(request.code, namespace, timeout))
+        conn.send(_execute_once(request.code, namespace, timeout, policy))
 
     conn.close()

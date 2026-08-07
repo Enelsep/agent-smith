@@ -164,12 +164,6 @@ def _call_signature(input_schema: dict[str, Any]) -> str:
 
 def to_sandbox_manual(tools: list[MCPToolDefinition]) -> str:
     """The tool section of the sandbox manual, as compact markdown.
-
-    Built from `list_tools()` alone, so connecting a different server -- or an
-    unknown one -- documents whatever that server offers with no code change.
-    Regenerate it on every connection; it describes one session's tools, not
-    a fixed set.
-
     One line per tool, because this is re-sent to the model on every turn and
     the input budget is cumulative over the task.
     """

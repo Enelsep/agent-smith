@@ -1,16 +1,3 @@
-"""The interactive sandbox: a prompt that runs what you type in the worker.
-
-`uv run sandbox` with no task is this. Entries cross the same process boundary
-the agent's code does and land in the same persistent namespace, so the import
-guard, the filesystem policy, the timeout and the memory cap all apply exactly
-as they do to a model's code. That is the whole reason to offer a prompt: it is
-the only way to try a restriction by hand and watch it refuse.
-
-Nothing here executes anything. Source is compiled once, in this process, to
-decide whether the user has finished typing -- the code object is thrown away
-and the text is handed to the worker, which is where every guard lives.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -76,18 +63,7 @@ def ends_entry(lines: list[str]) -> bool:
 
 
 def echo_expression(source: str) -> str:
-    """Rewrite a trailing bare expression so that its value is printed.
-
-    `exec` evaluates expression statements and discards the result, so `1 + 1`
-    would otherwise run and show nothing at all. Binding to `_` first keeps the
-    value reachable; printing only when it is not None is what stops `print(x)`
-    from reporting the None that `print` returns.
-
-    The expression is copied verbatim from the source rather than unparsed from
-    the tree, so what the worker runs is what was typed. Anything that cannot
-    be rewritten safely -- a statement tucked after a semicolon, source that no
-    longer parses -- comes back untouched and simply does not echo.
-    """
+    """Rewrite a trailing bare expression so that its value is printed."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -97,8 +73,6 @@ def echo_expression(source: str) -> str:
         return source
 
     last = tree.body[-1]
-    # A non-zero column means the expression shares its line with something
-    # else (`x = 1; x`), and the line-based split below would cut through it.
     if not isinstance(last, ast.Expr) or last.col_offset != 0:
         return source
 
@@ -110,10 +84,6 @@ def echo_expression(source: str) -> str:
     body = "\n".join(expression)
     assignment = f"{ECHO_NAME} = ({body})"
     if len(expression) > 1 or not _parses(assignment):
-        # Either the expression spans lines, or a trailing comment on it would
-        # swallow a closing bracket left on the same line. Both are fixed by
-        # giving the bracket a line of its own, at the cost of shifting the
-        # line numbers a traceback would report by one.
         assignment = f"{ECHO_NAME} = (\n{body}\n)"
 
     return "\n".join(
@@ -157,9 +127,6 @@ def run_repl(
             write("")
             if not lines:
                 return
-            # End of input closes a pending block the way a blank line does.
-            # Piped input rarely ends with one, and returning here instead
-            # would discard the entry without running it or saying so.
             eof, line = True, ""
         except KeyboardInterrupt:
             write("KeyboardInterrupt")
@@ -184,9 +151,6 @@ def run_repl(
 
         if incomplete or not ends_entry(lines):
             if eof:
-                # Nothing safe to run: the block never finished. Say so rather
-                # than drop it, which is what the old EOF path did to
-                # everything.
                 write("SyntaxError: unexpected end of input")
                 return
             continue
