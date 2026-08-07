@@ -25,6 +25,13 @@ MODELS = {
                 "llama-3.3-70b-versatile": {"stop": ["<end_code>"], "max_tokens": 1500},
             },
         },
+        "mistral": {
+            "base_url": "https://api.mistral.ai/v1",
+            "default_model": "mistral-medium-latest",
+            "models": {
+                "mistral-medium-latest": {"stop": ["<end_code>"], "max_tokens": 1500},
+            },
+        },
         "openrouter": {
             "base_url": "https://openrouter.ai/api/v1",
             "default_model": "qwen/qwen3-235b-a22b-2507",
@@ -197,18 +204,18 @@ class TestTheDefaultProviderFollowsTheKeysOnHand:
     ) -> None:
         config = resolve(
             config_files,
-            {"GROQ_API_KEY": "key-1", "OPENROUTER_API_KEY": "key-or"},
+            {"MISTRAL_API_KEY": "key-m", "OPENROUTER_API_KEY": "key-or"},
         )
 
-        assert config.provider_name == "groq"
-        assert config.api_keys == ["key-1"]
+        assert config.provider_name == "mistral"
+        assert config.api_keys == ["key-m"]
 
     def test_a_generic_key_alone_still_reaches_the_development_default(
         self, config_files: tuple[Path, Path]
     ) -> None:
         config = resolve(config_files, {"API_KEY": "key-generic"})
 
-        assert config.provider_name == "groq"
+        assert config.provider_name == "mistral"
         assert config.api_keys == ["key-generic"]
 
 
@@ -248,9 +255,11 @@ class TestMissingKeys:
         with pytest.raises(ConfigError) as raised:
             resolve(config_files, {"PATH": "/usr/bin"})
 
+        # The variables named are the development default's, whichever provider
+        # that is: a keyless environment has nothing else to be told about.
         message = str(raised.value)
-        assert "GROQ_API_KEY" in message
-        assert "GROQ_API_KEYS" in message
+        assert "MISTRAL_API_KEY" in message
+        assert "MISTRAL_API_KEYS" in message
         assert "LLM_API_KEY" in message
 
 
