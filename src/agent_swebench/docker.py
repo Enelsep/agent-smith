@@ -62,8 +62,35 @@ class DockerManager:
     # ------------------------------------------------------------------
     # Lifecycle Methods
     # ------------------------------------------------------------------
+    def bootstrap_dependencies(self) -> None:
+        """Bootstraps container-side developer tools (ruff, jedi, ripgrep).
+
+        Attempts to install tools once at container startup. Any installation
+        failure is caught and logged as a warning so the agent can degrade
+        gracefully to fallbacks rather than failing early.
+        """
+        logger.info("Bootstrapping container dependencies (ruff, jedi, ripgrep)...")
+        try:
+            code, stdout, stderr = self.exec("pip install --quiet ruff jedi ripgrep")
+            if code == 0:
+                logger.info("Successfully bootstrapped container dependencies.")
+                return
+
+            logger.warning(
+                "Failed to bootstrap dependencies via pip "
+                f"(exit code {code}): {stderr.strip() or stdout.strip() or 'unknown error'}. "
+                "Attempting apt-get fallback..."
+            )
+            code_apt, _, stderr_apt = self.exec(
+                "apt-get update && apt-get install -y ripgrep"
+            )
+            if code_apt != 0:
+                logger.warning(f"apt-get fallback also failed: {stderr_apt.strip()}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Exception during container dependency bootstrap: {exc}")
+
     def start(self) -> None:
-        """Pulls the image if necessary and starts the container."""
+        """Pulls the image if necessary, starts the container, and bootstraps tools."""
         # 4. Startup sweep
         self.sweep_orphans()
 
@@ -107,6 +134,7 @@ class DockerManager:
         try:
             res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
             self.container_id = res.stdout.strip()
+            self.bootstrap_dependencies()
         except Exception:
             self.cleanup()
             raise
