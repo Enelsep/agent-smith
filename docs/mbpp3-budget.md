@@ -13,16 +13,25 @@ this card had to enable it.
 | Ceiling | Limit | Worst case observed | Headroom |
 |---|---|---|---|
 | iterations | 10 | 5 | 50% |
-| cumulative input tokens | 6 000 | 4 384 | 27% |
+| cumulative input tokens | 6 000 | 4 769 | 21% |
 | cumulative output tokens | 1 500 | 1 215 | 19% |
 | wall clock | 120 s | 19.3 s | 84% |
 
 **No task breached any ceiling.** The budget guard CORE-5 shipped never had to force a
 submission — it is present and correct, and on this batch it simply never fired.
 
-The tightest of the four is the output budget, at 81% consumed in the worst case. That is the
-one to watch when the prompt or the model changes: it is also the ceiling that is cumulative
-over the whole task, so a single verbose turn can spend it.
+Two of the four are close: output at 81% consumed in the worst case, input at 79%. Both are
+cumulative over the whole task, so watch both when the prompt or the model changes. The two
+worst cases are different tasks — 160 for output, 260 for input — so no single run has been
+near either edge on both axes at once.
+
+Input is the one the forced-submission retry moves. A forced turn that answers nothing is now
+retried while the budget allows, so the no-answer path costs up to one extra call, plus the
+nudge appended to each forced view. How much that is depends on how large the transcript has
+grown by then: an adversarial provider that never returns a fenced block spent 3% more input
+under one prompt size and 24% more under another, in both cases stopping inside the ceiling
+on the affordability check. None of the ten tasks above reached the guard, so that path is not
+in the table.
 
 ## Per task
 
@@ -48,6 +57,13 @@ rather than far more.
 **Correctness is a separate axis and this card does not move it.** The moulinette validates 7
 of these 10 against the hidden tests. Since nothing breaches a ceiling, overall equals
 correctness here — the failures are wrong answers, not budget failures.
+
+**The output ceiling holds by construction, not by luck.** Every request is capped at
+`min(models.json max_tokens, what the output budget has left)`, so the ceiling is reached
+exactly, never crossed: a run allowed 1 500 asks for 1 500, then 900, then 300. The one
+assumption is that the endpoint honours `max_tokens` — a provider that ignores it, or one that
+bills reasoning tokens outside the completion, would overshoot and nothing here would stop it.
+That is worth re-checking on any model whose billing is not plain completion tokens.
 
 **One run, one model, one provider.** Sampling is not deterministic, so a single batch cannot
 separate a real change from run-to-run variance; task-level correctness in particular moves
