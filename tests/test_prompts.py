@@ -81,24 +81,12 @@ def test_the_mbpp_prompt_requires_the_solution_to_carry_its_imports() -> None:
     assert "final_answer" in text
 
 
-SWEBENCH_TOOLS = (
-    "read_file",
-    "edit_file",
-    "list_files",
-    "search_code",
-    "search_function_or_class_definition_in_code",
-    "find_references",
-    "run_tests",
-    "get_patch",
-    "run_command",
-)
-
-
-def test_the_swebench_prompt_names_every_tool_the_server_exposes() -> None:
-    text = load_prompt("swebench")
-
-    missing = [tool for tool in SWEBENCH_TOOLS if tool not in text]
-    assert not missing, f"tools absent from the prompt: {missing}"
+def test_the_swebench_prompt_leaves_the_tool_section_to_be_generated() -> None:
+    # The tool list is not written here: `cli/swebench/prompt.py` fills this
+    # placeholder from the schemas the connected server publishes, so the
+    # documentation cannot drift from the server the way a hand-written list
+    # does. What this file has to keep is the substitution point.
+    assert "{tools}" in load_prompt("swebench")
 
 
 def test_the_swebench_prompt_uses_the_same_turn_shape_as_mbpp() -> None:

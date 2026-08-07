@@ -4,6 +4,7 @@ import atexit
 import contextlib
 import logging
 import subprocess
+from pathlib import Path
 from types import TracebackType
 
 from typing_extensions import Self
@@ -159,6 +160,27 @@ class DockerManager:
             self.cleanup()
             raise
 
+    def copy_in(self, source: Path, destination: str) -> None:
+        """Copy a file or directory from the host into the running container.
+
+        A failure carries what docker said. `CalledProcessError` renders only
+        the command and the exit status, and on a graded run the error field of
+        the solution file is the whole account of what went wrong.
+        """
+        if self.container_id is None:
+            raise RuntimeError("the container is not running")
+        copied = subprocess.run(
+            ["docker", "cp", str(source), f"{self.container_id}:{destination}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if copied.returncode != 0:
+            raise RuntimeError(
+                f"could not copy {source} into the container: "
+                f"{copied.stderr.strip() or copied.stdout.strip() or 'no output'}"
+            )
+
     def exec(
         self,
         command: str,
@@ -209,8 +231,22 @@ class DockerManager:
         if code == 0 and path:
             return path
 
-        logger.info("TESTBED_PATH variable not found; falling back to /testbed")
-        return "/testbed"
+        # The fallback is checked rather than assumed: callers use this path as
+        # a working directory, and `docker exec -w` on a directory that is not
+        # there kills the exec outright. A wrong guess should cost accuracy,
+        # not the session.
+        code, _, _ = self.exec("test -d /testbed")
+        if code == 0:
+            logger.info("TESTBED_PATH variable not found; falling back to /testbed")
+            return "/testbed"
+
+        code, stdout, _ = self.exec("pwd")
+        working_directory = stdout.strip()
+        logger.warning(
+            "neither TESTBED_PATH nor /testbed found; using the image's own "
+            f"working directory {working_directory or '/'}"
+        )
+        return working_directory or "/"
 
     def cleanup(self) -> None:
         """Safely cleans up the container (forced removal)."""

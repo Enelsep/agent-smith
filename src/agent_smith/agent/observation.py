@@ -12,9 +12,15 @@ NAMESPACE_LOST = (
 )
 
 EMPTY_ANSWER = (
-    "You called final_answer() without a value. Call it again, passing the "
-    "answer itself as the argument."
+    "You called final_answer() without a value. If you passed get_patch(), the "
+    "diff is empty: nothing in the repository has changed yet, so make the edit "
+    "first and check that it took. Otherwise call final_answer() again, passing "
+    "the answer itself as the argument."
 )
+"""Said whatever the benchmark. An MBPP run never calls `get_patch`, so the
+first sentence is inert there; naming it costs a handful of tokens in an
+observation that is already rare, and threading the benchmark down to here
+to save them would cost a parameter on every caller."""
 
 
 def from_extraction(result: ExtractionResult) -> str:
