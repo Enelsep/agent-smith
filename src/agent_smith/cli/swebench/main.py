@@ -42,6 +42,13 @@ MAX_WALL_CLOCK_SECONDS = 900.0
 SERVER_SOURCE = Path(__file__).resolve().parents[4] / "mcp_tools_swebench.py"
 SERVER_IN_CONTAINER = "/mcp_tools_swebench.py"
 
+# The server is a thin dispatcher over `agent_smith.tools`, so the package has
+# to travel with it. Nothing under `tools` imports beyond the standard library,
+# an optional `jedi` and one sibling module, so the copy needs no install and no
+# dependency of ours inside the image.
+PACKAGE_SOURCE = Path(__file__).resolve().parents[2]
+PACKAGE_PARENT_IN_CONTAINER = "/"
+
 UNKNOWN_TASK_ID = "unknown"
 
 
@@ -113,6 +120,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             container.start()
             session.callback(container.cleanup)
             container.copy_in(SERVER_SOURCE, SERVER_IN_CONTAINER)
+            container.copy_in(PACKAGE_SOURCE, PACKAGE_PARENT_IN_CONTAINER)
 
             # ponytail: assumes `python` on PATH inside the image. SWE-5 can
             # name an interpreter path here if some image needs one.
@@ -122,6 +130,8 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                     args=[
                         "exec",
                         "-i",
+                        "-e",
+                        f"PYTHONPATH={PACKAGE_PARENT_IN_CONTAINER}",
                         str(container.container_id),
                         "python",
                         SERVER_IN_CONTAINER,

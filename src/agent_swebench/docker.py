@@ -161,7 +161,7 @@ class DockerManager:
             raise
 
     def copy_in(self, source: Path, destination: str) -> None:
-        """Copy a file from the host into the running container."""
+        """Copy a file or directory from the host into the running container."""
         if self.container_id is None:
             raise RuntimeError("the container is not running")
         subprocess.run(

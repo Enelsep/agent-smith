@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from mcp_tools_swebench import _handle_request
@@ -56,3 +61,26 @@ def test_tools_call_invalid_params() -> None:
     assert resp is not None
     assert "error" in resp
     assert resp["error"]["code"] == -32602
+
+
+def test_the_server_runs_on_the_copied_package_alone(tmp_path: Path) -> None:
+    # SWE-3 copies this file and `agent_smith` into the image and runs them
+    # with PYTHONPATH. Nothing of ours is installed there, so an import the
+    # copy does not carry is a run that dies before its first tool call.
+    # `-S` drops site-packages, which is what stands in for the container:
+    # without it the installed copy answers and the probe proves nothing.
+    root = Path(__file__).resolve().parents[1]
+    shutil.copytree(root / "src" / "agent_smith", tmp_path / "agent_smith")
+
+    listed = subprocess.run(
+        [sys.executable, "-S", str(root / "mcp_tools_swebench.py")],
+        input='{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}\n',
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={"PYTHONPATH": str(tmp_path), "PATH": os.environ.get("PATH", "")},
+        check=False,
+    )
+
+    assert listed.returncode == 0, listed.stderr
+    assert '"read_file"' in listed.stdout

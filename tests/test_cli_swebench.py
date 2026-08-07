@@ -111,6 +111,21 @@ class TestTheRun:
         assert args[:2] == ["exec", "-i"]
         assert "cid-123" in args
 
+    def test_the_package_the_server_imports_travels_with_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `mcp_tools_swebench.py` is a dispatcher over `agent_smith.tools`, and
+        # the image has never heard of us. Copying the server alone leaves the
+        # container with a file that cannot import its first line.
+        budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        copied = {str(destination) for _, destination in COPIES}
+        assert cli.SERVER_IN_CONTAINER in copied
+        assert cli.PACKAGE_PARENT_IN_CONTAINER in copied
+
+        _, args = CLIENTS[-1]
+        assert f"PYTHONPATH={cli.PACKAGE_PARENT_IN_CONTAINER}" in args
+
     def test_an_unreadable_task_file_still_leaves_a_valid_solution(
         self, tmp_path: Path
     ) -> None:
@@ -158,6 +173,9 @@ class TestTheRun:
 CLIENTS: list[tuple[str, list[str]]] = []
 """Every MCP client the CLI built, as (command, args)."""
 
+COPIES: list[tuple[Path, str]] = []
+"""Every copy the CLI made into the container, as (source, destination)."""
+
 
 class _Container:
     """A DockerManager that records instead of talking to Docker."""
@@ -169,7 +187,9 @@ class _Container:
 
     def start(self) -> None: ...
     def cleanup(self) -> None: ...
-    def copy_in(self, source: Path, destination: str) -> None: ...
+
+    def copy_in(self, source: Path, destination: str) -> None:
+        COPIES.append((source, destination))
 
 
 class _Bridge:
@@ -187,6 +207,7 @@ class _Bridge:
 def _stub_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
     """Everything the CLI reaches for that is not the subject of the test."""
     CLIENTS.clear()
+    COPIES.clear()
 
     def record(command: str, args: list[str]) -> object:
         CLIENTS.append((command, args))
