@@ -125,13 +125,3 @@ def test_a_comments_only_block_is_told_what_it_is_missing() -> None:
     assert "only comments" in said
     assert "Comments do not run" in said
     assert feedback.FORMATS not in said
-
-
-def test_a_reply_the_endpoint_cut_off_says_so() -> None:
-    said = observation.from_extraction(
-        ExtractionResult(failure="No code block was found in your reply"),
-        cut_short=True,
-    )
-
-    assert "No code block was found" in said
-    assert "cut off at its token limit" in said

@@ -1249,3 +1249,40 @@ def test_a_reply_cut_off_mid_comment_is_told_both_things() -> None:
     said = provider.calls[1][-1]["content"]
     assert "cut off at its token limit" in said
     assert "Comments do not run" in said
+
+
+def test_a_validator_that_blows_up_does_not_take_the_answer_with_it() -> None:
+    # Validating runs code, and running code can lose the worker. The answer is
+    # held before the judging, so a sandbox that dies mid-check costs the run
+    # its success, not its solution.
+    provider = FakeProvider([a_response("```python\nfinal_answer('the answer')\n```")])
+    sandbox = FakeSandbox([answered("the answer")])
+
+    def explode(_: str) -> str | None:
+        raise RuntimeError("sandbox has no live connection to its worker")
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), validate_answer=explode
+    )
+
+    assert solution.success is False
+    assert solution.solution == "the answer"
+
+
+def test_a_truncated_reply_is_named_even_when_its_code_ran() -> None:
+    # The common truncation stops after a complete def and before the calls that
+    # would print anything. The block runs, the sandbox says "printed nothing",
+    # and without this the model re-sends the same over-long reply.
+    provider = FakeProvider(
+        [
+            a_response(
+                "```python\ndef add(a, b):\n    return a + b\n```", cut_short=True
+            ),
+            a_response("```python\nfinal_answer('done')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([ok(), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert "cut off at its token limit" in provider.calls[1][-1]["content"]

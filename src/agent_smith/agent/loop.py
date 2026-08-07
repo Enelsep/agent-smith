@@ -23,6 +23,7 @@ from agent_smith.agent.history import compact_history
 from agent_smith.extraction import extract_code
 from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput, StepMetrics
+from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 if TYPE_CHECKING:
@@ -271,21 +272,22 @@ class _Run:
             if extracted.code is None:
                 # Nothing ran, so both sandbox fields stay empty: `StepMetrics`
                 # documents that as correct for a step with no execution.
-                said = observation.from_extraction(
-                    extracted, cut_short=answer.cut_short
-                )
+                said = observation.from_extraction(extracted)
                 self._record(step, answer, sandbox_input="", sandbox_output="")
             else:
                 before = sandbox.restarts
                 executed = sandbox.execute(extracted.code)
                 if executed.outcome is Outcome.FINAL_ANSWER and executed.final_answer:
+                    # Held before the judging, not after: validating runs code,
+                    # and code that takes the sandbox down with it must not take
+                    # the answer too.
+                    self.solution = executed.final_answer
                     rejection = (
                         None
                         if validate_answer is None
                         else validate_answer(executed.final_answer)
                     )
                     if rejection is None:
-                        self.solution = executed.final_answer
                         self.success = True
                         self._record(
                             step,
@@ -298,11 +300,10 @@ class _Run:
                     # an answer, and the run has budget left to say so. The
                     # reason takes the place of the observation, which is what
                     # gives the next turn something to act on.
+                    # The answer stays where it was put, without the success it
+                    # did not earn: if the run ends before a submission passes,
+                    # a refused attempt is worth more than an empty string.
                     said = rejection
-                    # Kept anyway, without the success it did not earn: if the
-                    # run ends before a submission passes, a refused attempt is
-                    # still worth more to the grader than an empty string.
-                    self.solution = executed.final_answer
                     if sandbox.restarts != before:
                         # Validating can cost the worker, and the model would
                         # otherwise keep referring to a namespace it has lost.
@@ -314,6 +315,12 @@ class _Run:
                         repair_note=extracted.repair_note,
                     )
                 self._record(step, answer, extracted.code, said)
+            if answer.cut_short:
+                # Whatever the step ended as, the reply that produced it stopped
+                # at the cap rather than where the model meant. Added after the
+                # step is recorded: the sandbox did not say this, the endpoint
+                # did, and `sandbox_output` is the sandbox's own account.
+                said = f"{said}\n\n{feedback.reply_cut_short()}"
             if reason == "wall_clock":
                 # The one budget that cannot be reserved against. `can_afford_
                 # forced_call` and `can_attempt_submission` let a token stop be

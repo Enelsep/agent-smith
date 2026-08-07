@@ -23,17 +23,13 @@ observation that is already rare, and threading the benchmark down to here
 to save them would cost a parameter on every caller."""
 
 
-def from_extraction(result: ExtractionResult, *, cut_short: bool = False) -> str:
+def from_extraction(result: ExtractionResult) -> str:
     """The observation for a reply that carried no runnable code.
 
     CORE-3 writes its failures as messages addressed to the model, so each is
     handed to `feedback.no_code_block` as the reason: it keeps the extractor's
     account of what went wrong and adds the sandbox's own voice and the way
     out.
-
-    `cut_short` is the endpoint reporting that it stopped the reply at the token
-    cap. It trails the diagnosis because it explains how the reply came to be
-    that shape, which is only worth reading once the shape has been named.
     """
     # A block that holds only comments was framed correctly and reasoned in the
     # wrong place: neither the format list nor "send a well-formed block" says
@@ -46,7 +42,7 @@ def from_extraction(result: ExtractionResult, *, cut_short: bool = False) -> str
         said = feedback.no_code_block(
             result.failure, saw_format=result.strategy is not None
         )
-    return f"{said}\n\n{feedback.reply_cut_short()}" if cut_short else said
+    return said
 
 
 def from_execution(
