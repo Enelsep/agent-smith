@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -160,10 +160,16 @@ def test_bootstrap_dependencies_success() -> None:
     mgr.container_id = "cid123"
 
     with patch.object(mgr, "exec") as mock_exec:
-        mock_exec.return_value = (0, "Successfully installed ruff jedi ripgrep", "")
+        mock_exec.return_value = (0, "Successfully installed", "")
         mgr.bootstrap_dependencies()
 
-        mock_exec.assert_called_once_with("pip install --quiet ruff jedi ripgrep")
+        assert mock_exec.call_count == 2
+        mock_exec.assert_has_calls(
+            [
+                call("pip install --quiet ruff jedi", timeout=120.0),
+                call("pip install --quiet ripgrep==14.1.0", timeout=120.0),
+            ]
+        )
 
 
 def test_bootstrap_dependencies_pip_failure_apt_fallback(
@@ -173,16 +179,18 @@ def test_bootstrap_dependencies_pip_failure_apt_fallback(
     mgr.container_id = "cid123"
 
     with patch.object(mgr, "exec") as mock_exec, caplog.at_level("WARNING"):
-        # Pip fails, apt-get succeeds
+        # 1. Pip ruff/jedi fails, 2. Pip ripgrep fails, 3. apt-get succeeds
         mock_exec.side_effect = [
-            (1, "", "No matching distribution found"),
+            (1, "", "No matching distribution found for ruff"),
+            (1, "", "No matching distribution found for ripgrep"),
             (0, "apt updated and installed", ""),
         ]
 
         mgr.bootstrap_dependencies()
 
-        assert mock_exec.call_count == 2
-        assert "Failed to bootstrap dependencies via pip" in caplog.text
+        assert mock_exec.call_count == 3
+        assert "Failed to install ruff/jedi via pip" in caplog.text
+        assert "Failed to install ripgrep==14.1.0 via pip" in caplog.text
 
 
 def test_bootstrap_dependencies_total_failure_tolerated(
