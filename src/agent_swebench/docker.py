@@ -62,8 +62,55 @@ class DockerManager:
     # ------------------------------------------------------------------
     # Lifecycle Methods
     # ------------------------------------------------------------------
+    def bootstrap_dependencies(self) -> None:
+        """Bootstraps container-side developer tools (ruff, jedi, ripgrep).
+
+        Attempts to install tools once at container startup with strict timeouts.
+        - Split pip calls ensure ruff/jedi succeed even if ripgrep fails.
+        - ripgrep is pinned to 14.1.0 to leverage its prebuilt manylinux_2_17 wheels,
+          preventing source compilation failures on older glibc environments (SWE-bench).
+        """
+        logger.info("Bootstrapping container dependencies (ruff, jedi, ripgrep)...")
+        try:
+            # 1. Install ruff and jedi (Fast & reliable via PyPI wheels)
+            code_py, stdout_py, stderr_py = self.exec(
+                "pip install --quiet ruff jedi", timeout=120.0
+            )
+            if code_py != 0:
+                logger.warning(
+                    "Failed to install ruff/jedi via pip "
+                    f"(exit code {code_py}): {stderr_py.strip() or stdout_py.strip()}"
+                )
+
+            # 2. Install ripgrep pinned to 14.1.0
+            # PIN REASON: 14.1.0 is the last release with broad manylinux_2_17 wheel support.
+            # Newer versions require glibc >= 2.39 and fail back to Rust source compilation.
+            code_rg, stdout_rg, stderr_rg = self.exec(
+                "pip install --quiet ripgrep==14.1.0", timeout=120.0
+            )
+
+            if code_rg != 0:
+                logger.warning(
+                    "Failed to install ripgrep==14.1.0 via pip "
+                    f"(exit code {code_rg}): {stderr_rg.strip() or stdout_rg.strip()}. "
+                    "Attempting apt-get fallback..."
+                )
+                code_apt, _, stderr_apt = self.exec(
+                    "apt-get update && apt-get install -y ripgrep", timeout=120.0
+                )
+                if code_apt != 0:
+                    logger.warning(
+                        f"apt-get fallback for ripgrep also failed: {stderr_apt.strip()}"
+                    )
+
+            if code_py == 0 and (code_rg == 0 or code_apt == 0):
+                logger.info("Successfully bootstrapped container dependencies.")
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Exception during container dependency bootstrap: {exc}")
+
     def start(self) -> None:
-        """Pulls the image if necessary and starts the container."""
+        """Pulls the image if necessary, starts the container, and bootstraps tools."""
         # 4. Startup sweep
         self.sweep_orphans()
 
@@ -107,6 +154,7 @@ class DockerManager:
         try:
             res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
             self.container_id = res.stdout.strip()
+            self.bootstrap_dependencies()
         except Exception:
             self.cleanup()
             raise

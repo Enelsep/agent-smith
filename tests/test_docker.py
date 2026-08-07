@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -153,3 +153,77 @@ def test_atexit_handler_registration_and_cleanup() -> None:
 
         mgr.cleanup()
         mock_unregister.assert_called_once_with(mgr._atexit_handler)
+
+
+def test_bootstrap_dependencies_success() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec:
+        mock_exec.return_value = (0, "Successfully installed", "")
+        mgr.bootstrap_dependencies()
+
+        assert mock_exec.call_count == 2
+        mock_exec.assert_has_calls(
+            [
+                call("pip install --quiet ruff jedi", timeout=120.0),
+                call("pip install --quiet ripgrep==14.1.0", timeout=120.0),
+            ]
+        )
+
+
+def test_bootstrap_dependencies_pip_failure_apt_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec, caplog.at_level("WARNING"):
+        # 1. Pip ruff/jedi fails, 2. Pip ripgrep fails, 3. apt-get succeeds
+        mock_exec.side_effect = [
+            (1, "", "No matching distribution found for ruff"),
+            (1, "", "No matching distribution found for ripgrep"),
+            (0, "apt updated and installed", ""),
+        ]
+
+        mgr.bootstrap_dependencies()
+
+        assert mock_exec.call_count == 3
+        assert "Failed to install ruff/jedi via pip" in caplog.text
+        assert "Failed to install ripgrep==14.1.0 via pip" in caplog.text
+
+
+def test_bootstrap_dependencies_total_failure_tolerated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec, caplog.at_level("WARNING"):
+        # Everything raises or fails
+        mock_exec.side_effect = RuntimeError("Container lost")
+
+        # Must not raise an exception
+        mgr.bootstrap_dependencies()
+
+        assert "Exception during container dependency bootstrap" in caplog.text
+
+
+def test_start_triggers_bootstrap_dependencies() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+
+    with (
+        patch("subprocess.run") as mock_run,
+        patch.object(mgr, "bootstrap_dependencies") as mock_bootstrap,
+    ):
+        mock_run.side_effect = [
+            MagicMock(stdout="", returncode=0),  # sweep_orphans
+            MagicMock(returncode=0),  # preventive removal
+            MagicMock(returncode=0),  # docker pull
+            MagicMock(stdout="cid123\n", returncode=0),  # docker run
+        ]
+
+        mgr.start()
+
+        assert mgr.container_id == "cid123"
+        mock_bootstrap.assert_called_once()
