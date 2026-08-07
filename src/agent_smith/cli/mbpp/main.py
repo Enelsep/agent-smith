@@ -106,6 +106,15 @@ def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
     last — is executed here against those same assertions, which is the closest
     this side can get to what the solution will be judged on.
 
+    The assertions run one at a time, and the failing one is quoted into the
+    refusal: the sandbox `exec`s a string, so its traceback can only point at
+    `<string>`, and a bare `AssertionError` names nothing the model can act on.
+
+    Only an exception raised by the submitted code counts against it. A blocked
+    import, a memory cap or a timeout is this sandbox's own policy speaking, and
+    the grader runs under different limits — refusing on those would reject an
+    answer for something it will never be judged on.
+
     A task carrying no visible tests has nothing to check against, and running
     the source on its own would refuse a good answer for printing nothing.
     """
@@ -113,12 +122,20 @@ def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
     def validate(submitted: str) -> str | None:
         if not task.test_list:
             return None
-        checked = sandbox.execute(
-            "\n".join([*task.test_imports, submitted, *task.test_list])
-        )
-        if checked.outcome is Outcome.OK:
-            return None
-        return REFUSED.format(failure=observation.from_execution(checked))
+        blocks = ["\n".join([*task.test_imports, submitted]), *task.test_list]
+        for index, block in enumerate(blocks):
+            ran = sandbox.execute(block)
+            if ran.outcome is Outcome.OK:
+                continue
+            if ran.outcome is not Outcome.ERROR:
+                return None
+            failure = observation.from_execution(ran)
+            # index 0 is the definition, whose own source the model just wrote
+            # and can see; every other block is an assertion it needs named.
+            return REFUSED.format(
+                failure=failure if index == 0 else f"{block}\n\n{failure}"
+            )
+        return None
 
     return validate
 

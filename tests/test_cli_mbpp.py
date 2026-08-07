@@ -273,7 +273,7 @@ class TestTheSubmissionIsChecked:
         return Sandbox()
 
     def test_a_submission_that_passes_the_given_tests_is_accepted(self) -> None:
-        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")])
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
 
         validate = cli.build_validator(A_TASK, sandbox)  # type: ignore[arg-type]
 
@@ -282,32 +282,66 @@ class TestTheSubmissionIsChecked:
     def test_the_submitted_source_runs_with_the_task_s_own_assertions(self) -> None:
         # Not the code the model happened to run: the string it submitted, which
         # is what the grader will run, and the assertions exactly as given.
-        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")])
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
 
         cli.build_validator(A_TASK, sandbox)("def remove_Occ(s, ch): return s")  # type: ignore[arg-type]
 
-        ran = sandbox.ran[0]  # type: ignore[attr-defined]
-        assert "def remove_Occ(s, ch): return s" in ran
-        assert 'assert remove_Occ("hello", "l") == "heo"' in ran
-        assert "import math" in ran
+        defined, asserted = sandbox.ran  # type: ignore[attr-defined]
+        assert "def remove_Occ(s, ch): return s" in defined
+        assert "import math" in defined
+        assert asserted == 'assert remove_Occ("hello", "l") == "heo"'
 
-    def test_a_failing_assertion_is_refused_and_quoted_back(self) -> None:
+    def test_the_refusal_names_the_assertion_that_failed(self) -> None:
+        # `exec` of a string can only blame `<string>`, so the traceback alone
+        # is a bare AssertionError: which case broke has to be said here.
+        task = A_TASK.model_copy(
+            update={
+                "test_list": [
+                    'assert remove_Occ("hello", "l") == "heo"',
+                    'assert remove_Occ("abcda", "a") == "bcd"',
+                ]
+            }
+        )
         sandbox = self.a_sandbox(
             [
+                ExecResult(outcome=Outcome.OK, stdout=""),
+                ExecResult(outcome=Outcome.OK, stdout=""),
                 ExecResult(
                     outcome=Outcome.ERROR,
                     stderr="AssertionError",
                     error="AssertionError",
-                )
+                ),
             ]
         )
 
-        refusal = cli.build_validator(A_TASK, sandbox)(
+        refusal = cli.build_validator(task, sandbox)(  # type: ignore[arg-type]
             "def remove_Occ(s, ch): return s"
-        )  # type: ignore[arg-type]
+        )
 
         assert refusal is not None
+        assert 'assert remove_Occ("abcda", "a") == "bcd"' in refusal
+        assert 'assert remove_Occ("hello", "l") == "heo"' not in refusal
         assert "AssertionError" in refusal
+
+    def test_a_submission_that_will_not_even_define_is_refused(self) -> None:
+        sandbox = self.a_sandbox(
+            [ExecResult(outcome=Outcome.ERROR, error="SyntaxError: invalid syntax")]
+        )
+
+        refusal = cli.build_validator(A_TASK, sandbox)("def remove_Occ(")  # type: ignore[arg-type]
+
+        assert refusal is not None
+        assert "SyntaxError" in refusal
+
+    def test_this_sandbox_s_own_limits_are_not_held_against_the_answer(self) -> None:
+        # The grader runs the solution in a container with its own imports and
+        # its own clock. Refusing here for an import this sandbox happens to
+        # block would reject an answer for something it is never judged on.
+        sandbox = self.a_sandbox(
+            [ExecResult(outcome=Outcome.BLOCKED, error="import of 'numpy' blocked")]
+        )
+
+        assert cli.build_validator(A_TASK, sandbox)("import numpy") is None  # type: ignore[arg-type]
 
     def test_a_task_with_no_visible_tests_accepts_whatever_it_is_given(self) -> None:
         # Nothing to check against, so there is nothing to refuse on -- and
