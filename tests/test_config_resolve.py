@@ -126,7 +126,7 @@ class TestTheSameCodePathServesEveryProvider:
 
 
 class TestDefaults:
-    def test_groq_is_the_development_default_when_no_url_is_passed(
+    def test_a_catalogued_provider_is_selected_when_no_url_is_passed(
         self, config_files: tuple[Path, Path]
     ) -> None:
         config = resolve(config_files, {"GROQ_API_KEY": "key-1"})
