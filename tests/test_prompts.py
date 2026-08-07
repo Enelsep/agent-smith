@@ -36,6 +36,18 @@ def test_the_mbpp_prompt_fits_the_budget_core6_allows() -> None:
     assert estimated <= MBPP_TOKEN_CEILING, f"{estimated} tokens"
 
 
+def test_the_mbpp_prompt_checks_with_assertions_rather_than_printed_output() -> None:
+    # MBPP-3: task 84 failed four runs in a row by printing its results,
+    # misreading them and submitting anyway — `1 1` was on screen where the
+    # visible test wanted `1 2`. Deciding whether printed values match is a
+    # judgement the model gets wrong; an assertion that raises is not a
+    # judgement at all.
+    text = load_prompt("mbpp")
+
+    assert "assert" in text
+    assert "printed results match" not in text
+
+
 def test_the_mbpp_prompt_keeps_the_delimiter_the_stack_agrees_on() -> None:
     # `<end_code>` is a stop sequence in models.json and a fence closer in
     # extraction.strategies. A prompt that stops naming it lets the model run

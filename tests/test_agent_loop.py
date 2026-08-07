@@ -877,9 +877,11 @@ def test_the_output_reserve_still_leaves_room_to_answer() -> None:
     assert solution.success is True
 
 
-def test_a_forced_iteration_whose_extraction_fails_still_ends_the_run() -> None:
-    # The other half of the branch: the run must stop after the forced
-    # iteration whether or not the reply contained code.
+def test_a_forced_iteration_ends_the_run_once_nothing_more_fits() -> None:
+    # A forced turn that answers nothing is retried while the ceiling has room
+    # for another attempt. This ceiling has none, so the run ends here — and it
+    # ends on the affordability check rather than on a rule that the forced
+    # turn is always the last one.
     provider = BillingProvider(
         script=[
             "```python\nx = 1  # " + "a" * 800 + "\n```",
@@ -893,13 +895,14 @@ def test_a_forced_iteration_whose_extraction_fails_still_ends_the_run() -> None:
         provider,
         sandbox,
         clock=FakeClock(),
-        max_input_tokens=FORCING_INPUT_CEILING,
+        max_input_tokens=EXHAUSTED_INPUT_CEILING,
     )
 
     assert solution.success is False
     assert solution.iterations == 2
     assert solution.error is not None
     assert "input_tokens" in solution.error
+    assert "would not fit" in solution.error
     assert solution.steps[1].sandbox_input == ""
 
 
@@ -1066,3 +1069,56 @@ def test_a_caller_who_says_nothing_still_gets_a_flat_transcript() -> None:
     assert TRUNCATION_MARKER in third_call[2]["content"]
     assert "Thought: one" not in third_call[2]["content"]
     assert "Thought: two" in third_call[4]["content"]
+
+
+EXHAUSTED_INPUT_CEILING = 1800
+"""A ceiling too tight for any attempt after the forced one, anywhere in 1700-1900."""
+
+RETRYABLE_INPUT_CEILING = 2200
+"""A ceiling with room for a second forced attempt after the first answers nothing.
+
+`FORCING_INPUT_CEILING` deliberately has none, so it exercises the other branch.
+Two attempts fit anywhere in 2120-2320 with this transcript; the middle is taken
+so rewording a prompt cannot quietly move the test onto the one-attempt branch.
+"""
+
+MALFORMED_SUBMISSION = "```python\nfinal_answer '''(\ndef f():\n    pass\n)'''\n```"
+"""A fenced block that does not parse, which is what task 260 actually sent."""
+
+
+def test_a_forced_turn_that_answers_nothing_is_tried_again_while_budget_allows() -> (
+    None
+):
+    # The forced turn is the model's last chance and it can waste it on a block
+    # that does not parse: task 260 sent `final_answer \'\'\'(` and the run ended
+    # with an empty solution. Stopping there throws away budget that was still
+    # there, and throws away the one thing that would fix the next attempt --
+    # the observation naming the syntax error.
+    provider = BillingProvider(
+        script=[
+            "```python\nx = 1\n```",
+            "```python\ny = 2\n```",
+            MALFORMED_SUBMISSION,
+            "```python\nfinal_answer('''def f():\n    pass\n''')\n```",
+        ]
+    )
+    sandbox = FakeSandbox(
+        [a_bulky_observation(), a_bulky_observation(), answered("done")]
+    )
+
+    result = run_task(
+        forcing_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_input_tokens=RETRYABLE_INPUT_CEILING,
+    )
+
+    nudged = [
+        i
+        for i, call in enumerate(provider.calls)
+        if call[-1]["content"] == budget.FORCED_SUBMISSION_NUDGE
+    ]
+    assert nudged == [2, 3], f"expected two forced attempts, got {nudged}"
+    assert result.success is True
+    assert result.solution == "done"
