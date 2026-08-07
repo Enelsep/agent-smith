@@ -297,6 +297,10 @@ class _Run:
                     # reason takes the place of the observation, which is what
                     # gives the next turn something to act on.
                     said = rejection
+                    # Kept anyway, without the success it did not earn: if the
+                    # run ends before a submission passes, a refused attempt is
+                    # still worth more to the grader than an empty string.
+                    self.solution = executed.final_answer
                     if sandbox.restarts != before:
                         # Validating can cost the worker, and the model would
                         # otherwise keep referring to a namespace it has lost.

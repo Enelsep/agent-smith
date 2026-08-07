@@ -1206,3 +1206,26 @@ def test_a_rejected_submission_is_recorded_as_the_step_that_it_was() -> None:
 
     assert solution.steps[0].sandbox_input == "final_answer('wrong')"
     assert solution.steps[0].sandbox_output == "no"
+
+
+def test_a_run_that_never_satisfies_the_validator_still_answers() -> None:
+    # The grader scores the string, not the flag. An attempt the validator
+    # refused can still pass the tests it is actually judged on -- our sandbox
+    # is not the container it will run in -- and an empty solution never can.
+    provider = FakeProvider(
+        [a_response("```python\nfinal_answer('best effort')\n```")] * 2
+    )
+    sandbox = FakeSandbox([answered("best effort")] * 2)
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_iterations=2,
+        validate_answer=lambda _: "it failed the given tests",
+    )
+
+    assert solution.success is False
+    assert solution.solution == "best effort"
+    assert solution.error is not None
