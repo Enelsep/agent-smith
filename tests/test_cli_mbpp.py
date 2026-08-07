@@ -266,6 +266,9 @@ class TestTheSubmissionIsChecked:
                 self.ran: list[str] = []
                 self.restarts = 0
 
+            def restart(self) -> None:
+                self.restarts += 1
+
             def execute(self, code: str):  # type: ignore[no-untyped-def]
                 self.ran.append(code)
                 return script.pop(0)
@@ -333,15 +336,31 @@ class TestTheSubmissionIsChecked:
         assert refusal is not None
         assert "SyntaxError" in refusal
 
-    def test_this_sandbox_s_own_limits_are_not_held_against_the_answer(self) -> None:
-        # The grader runs the solution in a container with its own imports and
-        # its own clock. Refusing here for an import this sandbox happens to
-        # block would reject an answer for something it is never judged on.
+    def test_a_submission_that_ends_the_run_on_its_own_is_refused(self) -> None:
+        # A submitted string carrying `final_answer(...)` raises out of the
+        # first block, so no assertion runs at all. Reading that as "not the
+        # submission's fault" would wave through the one thing the grader is
+        # guaranteed to fail on: `final_answer` does not exist there.
         sandbox = self.a_sandbox(
-            [ExecResult(outcome=Outcome.BLOCKED, error="import of 'numpy' blocked")]
+            [ExecResult(outcome=Outcome.FINAL_ANSWER, final_answer="whatever")]
         )
 
-        assert cli.build_validator(A_TASK, sandbox)("import numpy") is None  # type: ignore[arg-type]
+        assert (
+            cli.build_validator(A_TASK, sandbox)(  # type: ignore[arg-type]
+                "def remove_Occ(s, ch): return s\nfinal_answer('done')"
+            )
+            is not None
+        )
+
+    def test_the_submission_is_judged_on_its_own(self) -> None:
+        # The worker the loop drives still holds every helper the model defined
+        # along the way. A submission leaning on one of them passes here and
+        # raises NameError in front of the grader, so the namespace goes first.
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
+
+        cli.build_validator(A_TASK, sandbox)("def remove_Occ(s, ch): return s")  # type: ignore[arg-type]
+
+        assert sandbox.restarts == 1  # type: ignore[attr-defined]
 
     def test_a_task_with_no_visible_tests_accepts_whatever_it_is_given(self) -> None:
         # Nothing to check against, so there is nothing to refuse on -- and
