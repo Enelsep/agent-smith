@@ -271,7 +271,9 @@ class _Run:
             if extracted.code is None:
                 # Nothing ran, so both sandbox fields stay empty: `StepMetrics`
                 # documents that as correct for a step with no execution.
-                said = observation.from_extraction(extracted)
+                said = observation.from_extraction(
+                    extracted, cut_short=answer.cut_short
+                )
                 self._record(step, answer, sandbox_input="", sandbox_output="")
             else:
                 before = sandbox.restarts

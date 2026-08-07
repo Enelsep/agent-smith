@@ -1229,3 +1229,23 @@ def test_a_run_that_never_satisfies_the_validator_still_answers() -> None:
     assert solution.success is False
     assert solution.solution == "best effort"
     assert solution.error is not None
+
+
+def test_a_reply_cut_off_mid_comment_is_told_both_things() -> None:
+    # The observed failure: the model plans in comments, the token cap stops it
+    # before it writes any code, and the harness answers "no code block" -- true
+    # but useless. What it can act on is that it was cut off, and that comments
+    # are not what runs.
+    provider = FakeProvider(
+        [
+            a_response("```python\n# first I need to handle the empty", cut_short=True),
+            a_response("```python\nfinal_answer('done')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    said = provider.calls[1][-1]["content"]
+    assert "cut off at its token limit" in said
+    assert "Comments do not run" in said

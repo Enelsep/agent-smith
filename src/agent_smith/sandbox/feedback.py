@@ -34,6 +34,26 @@ def no_code_block(reason: str | None = None, *, saw_format: bool = False) -> str
     return notice(reason or "No runnable code block was found in your reply", advice)
 
 
+def only_comments(reason: str | None = None) -> str:
+    """The block was well formed and held nothing that runs."""
+    return notice(
+        reason or "Your code block holds only comments",
+        "Comments do not run, so nothing was executed and there is no result "
+        "to read. Send the code itself -- the def, the calls, the prints -- "
+        "and keep the reasoning short.",
+    )
+
+
+def reply_cut_short() -> str:
+    """The reply stopped at the token cap rather than where the model meant."""
+    return notice(
+        "Your reply was cut off at its token limit, so whatever it ended with "
+        "is incomplete",
+        "You are billed for every token you write, including the ones spent "
+        "before the code. Answer with the code block first and shorter.",
+    )
+
+
 def repaired_code(note: str, code: str | None = None) -> str:
     """A block that did not parse was fixed and run.
     The subject asks for the repair to be explained
