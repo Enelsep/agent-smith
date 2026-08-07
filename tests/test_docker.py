@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -227,3 +228,52 @@ def test_start_triggers_bootstrap_dependencies() -> None:
 
         assert mgr.container_id == "cid123"
         mock_bootstrap.assert_called_once()
+
+
+def test_a_failed_copy_in_says_what_docker_said() -> None:
+    # `CalledProcessError` renders the command and the exit status and drops
+    # stderr. On a graded run the solution's error field is the whole account.
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="lstat //nonexistent: no such file"
+        )
+
+        with pytest.raises(RuntimeError, match="no such file"):
+            mgr.copy_in(Path("/nonexistent"), "/somewhere")
+
+
+def test_a_copy_into_a_container_that_is_not_running_is_refused() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+
+    with pytest.raises(RuntimeError, match="not running"):
+        mgr.copy_in(Path("/anything"), "/somewhere")
+
+
+def test_locate_testbed_prefers_the_variable_the_image_sets() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec:
+        mock_exec.return_value = (0, "/srv/repo\n", "")
+
+        assert mgr.locate_testbed() == "/srv/repo"
+
+
+def test_locate_testbed_only_falls_back_to_a_directory_that_is_there() -> None:
+    # The path is used as `docker exec -w`, and -w on a missing directory does
+    # not warn -- it fails the exec, and with it every tool call.
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "cid123"
+
+    with patch.object(mgr, "exec") as mock_exec:
+        mock_exec.side_effect = [
+            (0, "", ""),  # echo $TESTBED_PATH -> empty
+            (1, "", ""),  # printenv TESTBED_PATH -> unset
+            (1, "", ""),  # test -d /testbed -> absent
+            (0, "/usr/src/app\n", ""),  # pwd
+        ]
+
+        assert mgr.locate_testbed() == "/usr/src/app"

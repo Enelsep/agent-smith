@@ -24,16 +24,21 @@ def build_system_prompt(tools: list[MCPToolDefinition]) -> str:
     return load_prompt("swebench").replace("{tools}", to_sandbox_manual(tools))
 
 
-def task_prompt(task: SWEBenchTaskInput) -> str:
+def task_prompt(task: SWEBenchTaskInput, testbed: str = "/testbed") -> str:
     """The one issue, in the order a fixer needs it.
 
     The evaluation script is quoted in full because `run_tests(eval_script,
     directory)` takes it as an argument: a model that has not been given the
     text cannot call the tool that decides whether it is done.
+
+    `testbed` is where the checkout lives inside the container. Every tool
+    defaults to the working directory, so a model that has to guess the path
+    spends iterations discovering it; naming it once here costs a line.
     """
     parts: list[str] = []
     if task.repo:
         parts.append(f"Repository: {task.repo}")
+    parts.append(f"The checkout is at {testbed}, and that is the working directory.")
     parts.append(task.problem_statement)
     if task.hints_text:
         parts += ["", "Hints:", task.hints_text]

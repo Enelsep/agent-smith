@@ -82,13 +82,15 @@ def load_task(path: Path) -> SWEBenchTaskInput:
         ) from malformed
 
 
-def build_task_spec(task: SWEBenchTaskInput, system_prompt: str) -> TaskSpec:
+def build_task_spec(
+    task: SWEBenchTaskInput, system_prompt: str, testbed: str = "/testbed"
+) -> TaskSpec:
     """Describe the task well enough for the loop to run it."""
     return TaskSpec(
         task_id=task.instance_id,
         benchmark=BENCHMARK,
         system_prompt=system_prompt,
-        task_prompt=task_prompt(task),
+        task_prompt=task_prompt(task, testbed),
     )
 
 
@@ -140,6 +142,12 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             container.copy_in(SERVER_SOURCE, SERVER_IN_CONTAINER)
             container.copy_in(PACKAGE_SOURCE, PACKAGE_PARENT_IN_CONTAINER)
 
+            # Where the checkout actually is, asked of the image rather than
+            # assumed: the tools all default to the working directory, and the
+            # server reads TESTBED_PATH. Both are set from the one answer, so
+            # neither the model nor a tool has to guess.
+            testbed = container.locate_testbed()
+
             # ponytail: assumes `python` on PATH inside the image. SWE-5 can
             # name an interpreter path here if some image needs one.
             bridge = MCPBridge(
@@ -148,8 +156,12 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                     args=[
                         "exec",
                         "-i",
+                        "-w",
+                        testbed,
                         "-e",
                         f"PYTHONPATH={PACKAGE_PARENT_IN_CONTAINER}",
+                        "-e",
+                        f"TESTBED_PATH={testbed}",
                         str(container.container_id),
                         "python",
                         SERVER_IN_CONTAINER,
@@ -159,7 +171,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             bridge.start()
             session.callback(bridge.close)
 
-            spec = build_task_spec(task, build_system_prompt(bridge.tool_defs))
+            spec = build_task_spec(task, build_system_prompt(bridge.tool_defs), testbed)
             sandbox = session.enter_context(
                 Sandbox.from_config(
                     config.sandbox,

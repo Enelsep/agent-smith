@@ -11,7 +11,7 @@ import pytest
 from agent_smith.cli.swebench import main as cli
 from agent_smith.cli.swebench.prompt import build_system_prompt, task_prompt
 from agent_smith.mcp.protocol import MCPToolDefinition
-from agent_smith.models.contract import SWEBenchTaskInput
+from agent_smith.models.contract import SolutionOutput, SWEBenchTaskInput
 
 A_TASK = SWEBenchTaskInput(
     instance_id="sympy__sympy-14711",
@@ -122,7 +122,9 @@ class TestTheRun:
         # spends the same 900 seconds the loop would otherwise think it has.
         seen = budget_reaching_the_loop(tmp_path, monkeypatch)
 
-        assert 0.0 < seen["max_wall_clock_seconds"] <= 900.0
+        left = seen["max_wall_clock_seconds"]
+        assert isinstance(left, float)
+        assert 0.0 < left <= 900.0
 
     def test_a_setup_longer_than_the_ceiling_leaves_no_budget(self) -> None:
         # A pull that overran must hand the loop zero, not a negative budget the
@@ -144,6 +146,43 @@ class TestTheRun:
 
         _, args = CLIENTS[-1]
         assert f"PYTHONPATH={cli.PACKAGE_PARENT_IN_CONTAINER}" in args
+
+    def test_the_repository_path_is_established_not_guessed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Every tool defaults to the working directory and the server reads
+        # TESTBED_PATH, so a container whose WORKDIR is not the checkout would
+        # cost iterations to a model discovering the path by trial.
+        budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        _, args = CLIENTS[-1]
+        assert args[args.index("-w") + 1] == "/testbed"
+        assert "TESTBED_PATH=/testbed" in args
+
+    def test_the_prompt_says_where_the_checkout_is(self) -> None:
+        assert "/testbed" in task_prompt(A_TASK, "/testbed")
+
+    def test_the_container_is_cleaned_up_after_a_finished_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A container left running is an explicit failure of the subject, and
+        # one leaks per task.
+        budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        assert CLEANED == ["cid-123"]
+
+    def test_the_container_is_cleaned_up_when_the_run_blows_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def explodes(*_: object, **__: object) -> None:
+            raise RuntimeError("the bridge died")
+
+        monkeypatch.setattr(cli, "run_task", explodes)
+        solution = solve_with_stubs(tmp_path, monkeypatch)
+
+        assert solution.success is False
+        assert "the bridge died" in (solution.error or "")
+        assert CLEANED == ["cid-123"]
 
     def test_an_unreadable_task_file_still_leaves_a_valid_solution(
         self, tmp_path: Path
@@ -195,6 +234,9 @@ CLIENTS: list[tuple[str, list[str]]] = []
 COPIES: list[tuple[Path, str]] = []
 """Every copy the CLI made into the container, as (source, destination)."""
 
+CLEANED: list[str] = []
+"""Every container the CLI tore down, by id."""
+
 
 class _Container:
     """A DockerManager that records instead of talking to Docker."""
@@ -205,7 +247,12 @@ class _Container:
         self.image = image
 
     def start(self) -> None: ...
-    def cleanup(self) -> None: ...
+
+    def cleanup(self) -> None:
+        CLEANED.append(self.container_id)
+
+    def locate_testbed(self) -> str:
+        return "/testbed"
 
     def copy_in(self, source: Path, destination: str) -> None:
         COPIES.append((source, destination))
@@ -227,6 +274,7 @@ def _stub_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
     """Everything the CLI reaches for that is not the subject of the test."""
     CLIENTS.clear()
     COPIES.clear()
+    CLEANED.clear()
 
     def record(command: str, args: list[str]) -> object:
         CLIENTS.append((command, args))
@@ -263,11 +311,21 @@ def budget_reaching_the_loop(
         seen.update(kwargs)
         return cli._failed(task.task_id, "stopped after recording the budget")
 
-    monkeypatch.setattr(cli, "DockerManager", _Container)
     monkeypatch.setattr(cli, "run_task", spy)
+    solve_with_stubs(tmp_path, monkeypatch)
+    return seen
+
+
+def solve_with_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SolutionOutput:
+    """`solve` with Docker, the bridge and the provider all faked.
+
+    The loop itself is left to the caller: `budget_reaching_the_loop` replaces
+    it with a spy, a test about failure replaces it with a raise.
+    """
+    monkeypatch.setattr(cli, "DockerManager", _Container)
     _stub_the_rest(monkeypatch)
 
-    cli.solve(
+    return cli.solve(
         cli.parse_args(
             [
                 "--task-file",
@@ -277,4 +335,3 @@ def budget_reaching_the_loop(
             ]
         )
     )
-    return seen
