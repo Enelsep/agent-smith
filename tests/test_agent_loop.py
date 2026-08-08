@@ -7,7 +7,7 @@ import pytest
 
 from agent_smith.agent import budget, observation
 from agent_smith.agent.history import TRUNCATION_MARKER
-from agent_smith.agent.loop import run_task
+from agent_smith.agent.loop import REPEATED_CODE, run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput
@@ -34,6 +34,12 @@ def a_task(**overrides: str) -> TaskSpec:
     }
     fields.update(overrides)
     return TaskSpec(**fields)
+
+
+SECOND = "```python\nprint(2)\n```"
+THIRD = "```python\nprint(3)\n```"
+"""Distinct blocks for a scripted turn that only needs to differ from the last:
+the loop refuses a block identical to the one that just ran."""
 
 
 def a_response(
@@ -225,7 +231,7 @@ def failed_extraction() -> LLMResponse:
 
 
 def test_a_second_attempt_sees_the_first_observation() -> None:
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("41\n"), answered("done")])
 
     run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -239,7 +245,7 @@ def test_a_second_attempt_sees_the_first_observation() -> None:
 
 
 def test_the_transcript_grows_by_two_messages_per_iteration() -> None:
-    provider = FakeProvider([a_response(), a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND), a_response(THIRD)])
     sandbox = FakeSandbox([ok("a\n"), ok("b\n"), answered("done")])
 
     run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -274,7 +280,7 @@ def test_a_silent_restart_warns_that_the_namespace_is_gone() -> None:
     # The sandbox restarts on its own when it finds a dead worker between
     # calls, and that path can still answer OK. Comparing `restarts` catches
     # it; reading the outcome would not.
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("fine\n"), answered("done")], restarts_before=[1])
 
     run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -283,7 +289,7 @@ def test_a_silent_restart_warns_that_the_namespace_is_gone() -> None:
 
 
 def test_a_step_without_a_restart_says_nothing_about_the_namespace() -> None:
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("fine\n"), answered("done")])
 
     run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -340,7 +346,7 @@ def test_a_non_terminal_outcome_still_reaches_a_final_answer(
     # None of these outcomes end the run: they are rendered as an observation
     # like any other, and the loop turns to a second iteration exactly as it
     # would after Outcome.OK.
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([executed, answered("done")])
 
     solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -358,7 +364,7 @@ def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None
         seen.append(list(messages))
         return messages[-1:]
 
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("41\n"), answered("done")])
 
     solution = run_task(
@@ -381,7 +387,7 @@ def test_compact_shapes_what_is_sent_without_touching_what_is_recorded() -> None
 
 
 def test_running_out_of_iterations_fails_without_raising() -> None:
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("a\n"), ok("b\n")])
 
     solution = run_task(
@@ -423,7 +429,7 @@ def test_a_provider_failure_on_the_first_call_still_returns_a_result() -> None:
 
 
 def test_final_answer_with_nothing_asks_again_rather_than_submitting_empty() -> None:
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([answered(None), answered("the real answer")])
 
     solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -435,7 +441,7 @@ def test_final_answer_with_nothing_asks_again_rather_than_submitting_empty() -> 
 
 
 def test_final_answer_with_an_empty_string_is_treated_the_same() -> None:
-    provider = FakeProvider([a_response(), a_response()])
+    provider = FakeProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([answered(""), answered("the real answer")])
 
     solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
@@ -499,7 +505,7 @@ def test_an_unexpected_failure_becomes_a_failed_result_not_a_traceback() -> None
 
 
 def test_what_the_run_had_done_survives_an_unexpected_failure() -> None:
-    provider = FakeProvider([a_response(input_tokens=99), a_response()])
+    provider = FakeProvider([a_response(input_tokens=99), a_response(SECOND)])
 
     class FailsOnTheSecondCall:
         restarts = 0
@@ -555,7 +561,7 @@ def test_the_wall_clock_budget_forces_one_last_submission_attempt() -> None:
             clock.advance(110.0)
             return super().complete(messages, stop, max_tokens)
 
-    provider = TimingProvider([a_response(), a_response()])
+    provider = TimingProvider([a_response(), a_response(SECOND)])
     sandbox = FakeSandbox([ok("not done yet\n"), ok("still not done\n")])
 
     solution = run_task(
@@ -912,8 +918,8 @@ def test_the_configured_per_call_ceiling_is_never_exceeded() -> None:
     provider = FakeProvider(
         [
             a_response(output_tokens=100),
-            a_response(output_tokens=100),
-            a_response(),
+            a_response(SECOND, output_tokens=100),
+            a_response(THIRD),
         ]
     )
     sandbox = FakeSandbox([ok("a\n"), ok("b\n"), answered("done")])
@@ -1122,3 +1128,54 @@ def test_a_forced_turn_that_answers_nothing_is_tried_again_while_budget_allows()
     assert nudged == [2, 3], f"expected two forced attempts, got {nudged}"
     assert result.success is True
     assert result.solution == "done"
+
+
+def test_a_block_identical_to_the_one_that_just_ran_is_not_run_again() -> None:
+    # The input ceiling is cumulative, so a repeat is billed the whole
+    # transcript for a result the model already has.
+    block = "```python\nprint(compute())\n```"
+    provider = FakeProvider([a_response(block), a_response(block), a_response()])
+    sandbox = FakeSandbox([ok("7\n"), ok("done")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert sandbox.received == ["print(compute())", "print(1)"]
+    assert solution.steps[1].sandbox_input == ""
+    assert solution.steps[1].sandbox_output == ""
+
+
+def test_the_model_is_told_why_its_repeat_did_not_run() -> None:
+    block = "```python\nprint(compute())\n```"
+    provider = FakeProvider([a_response(block), a_response(block), a_response()])
+    sandbox = FakeSandbox([ok("7\n"), ok("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    said = [m["content"] for m in provider.calls[-1] if m["role"] == "user"]
+    assert any(REPEATED_CODE in content for content in said)
+
+
+def test_a_repeat_that_is_not_consecutive_still_runs() -> None:
+    # Only the block that just ran is refused. Anything else happened in
+    # between, so the same code can legitimately answer differently.
+    first = "```python\nprint(state)\n```"
+    other = "```python\nadvance()\n```"
+    provider = FakeProvider(
+        [a_response(first), a_response(other), a_response(first), a_response()]
+    )
+    sandbox = FakeSandbox([ok("1\n"), ok(""), ok("2\n"), ok("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert sandbox.received == ["print(state)", "advance()", "print(state)", "print(1)"]
+
+
+def test_a_repeat_after_a_restart_runs_because_the_namespace_is_gone() -> None:
+    # Re-sending the block is how a model rebuilds what the dead worker took.
+    block = "```python\ndef helper(): return 1\n```"
+    provider = FakeProvider([a_response(block), a_response(block), a_response()])
+    sandbox = FakeSandbox([ok(""), ok(""), ok("done")], restarts_before=[1])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert sandbox.received[:2] == ["def helper(): return 1", "def helper(): return 1"]
