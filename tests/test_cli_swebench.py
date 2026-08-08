@@ -12,6 +12,7 @@ from agent_smith.cli.swebench import main as cli
 from agent_smith.cli.swebench.prompt import build_system_prompt, task_prompt
 from agent_smith.mcp.protocol import MCPToolDefinition
 from agent_smith.models.contract import SolutionOutput, SWEBenchTaskInput
+from agent_smith.tools.run_tests import PASSED_STATUS
 
 A_TASK = SWEBenchTaskInput(
     instance_id="sympy__sympy-14711",
@@ -82,6 +83,60 @@ class TestTheTaskPrompt:
         bare = A_TASK.model_copy(update={"hints_text": ""})
 
         assert "Hints" not in task_prompt(bare)
+
+
+class TestTheHarnessJudgesTheSubmission:
+    def test_a_patch_the_evaluation_script_accepts_goes_through(self) -> None:
+        calls: list[tuple[str, dict]] = []
+
+        def tool(name: str, arguments: dict) -> str:
+            calls.append((name, arguments))
+            return f"{PASSED_STATUS} (Exit code: 0)\nSummary: 3 passed, 0 failed"
+
+        validate = cli.build_validator(A_TASK, tool, "/testbed")
+
+        assert validate("diff --git a/x b/x") is None
+        # Judged in the container, on the task's own script, not on whatever
+        # the model happened to run last.
+        assert calls == [
+            ("run_tests", {"eval_script": A_TASK.eval_script, "directory": "/testbed"})
+        ]
+
+    def test_a_patch_that_fails_is_refused_with_what_failed(self) -> None:
+        # Measured: a model submitted the right patch having never seen a test
+        # pass. The refusal has to carry the output, or the model is told no
+        # and given nothing to act on.
+        failure = "Test Run Status: FAILED (Exit code: 1)\nSummary: 0 passed, 2 failed"
+        validate = cli.build_validator(
+            A_TASK, lambda name, arguments: failure, "/testbed"
+        )
+
+        refusal = validate("diff --git a/x b/x")
+
+        assert refusal is not None
+        assert failure in refusal
+        assert "submit again" in refusal
+
+    def test_a_task_with_no_evaluation_script_accepts_rather_than_refusing(
+        self,
+    ) -> None:
+        # Nothing to judge against. Refusing every submission would be worse
+        # than accepting one that was never checked.
+        bare = A_TASK.model_copy(update={"eval_script": "   "})
+        validate = cli.build_validator(
+            bare, lambda name, arguments: "unused", "/testbed"
+        )
+
+        assert validate("diff --git a/x b/x") is None
+
+    def test_the_loop_is_given_the_validator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Wiring it is the whole point: a validator the loop never receives
+        # lets a run end on a patch nothing checked.
+        seen = budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        assert callable(seen["validate_answer"])
 
 
 class TestTheRun:

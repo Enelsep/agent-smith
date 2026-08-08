@@ -9,6 +9,11 @@ import re
 import subprocess
 from pathlib import Path
 
+PASSED_STATUS = "Test Run Status: PASSED"
+FAILED_STATUS = "Test Run Status: FAILED"
+"""The verdict line, named so a caller can read it without quoting a literal
+that this module is free to reword. `cli.swebench` refuses a submission on it."""
+
 
 def run_tests(
     eval_script: str = "pytest",
@@ -37,6 +42,12 @@ def run_tests(
         process = subprocess.run(
             eval_script,
             shell=True,
+            # A SWE-bench task ships its evaluation as a bash script: `set -o
+            # pipefail`, `source`, `conda activate`. `shell=True` alone runs it
+            # under /bin/sh, which is dash on Debian and on these images, and
+            # dash has none of the three -- so the task's own script died on
+            # its second line and no run could ever be judged by it.
+            executable="/bin/bash",
             cwd=str(root_path),
             capture_output=True,
             text=True,
@@ -53,9 +64,9 @@ def run_tests(
     passed_count, failed_count, failing_names = _parse_test_output(raw_output)
 
     # Format structured output
-    status_str = "PASSED" if exit_code == 0 and failed_count == 0 else "FAILED"
+    passed = exit_code == 0 and failed_count == 0
     lines = [
-        f"Test Run Status: {status_str} (Exit code: {exit_code})",
+        f"{PASSED_STATUS if passed else FAILED_STATUS} (Exit code: {exit_code})",
         f"Summary: {passed_count} passed, {failed_count} failed",
     ]
 

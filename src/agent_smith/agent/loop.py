@@ -38,6 +38,42 @@ reason to refuse - addressed to the model, since that reason becomes the
 observation it reads next. Judging the answer here rather than in the prompt is
 what makes it hold whatever the model believes about its own work."""
 
+UNCHANGED_ANSWER = (
+    "final_answer refused: this is the submission that was just refused, "
+    "unchanged, so it was not judged again — the answer cannot come out "
+    "differently. Act on the reason above before submitting the same thing."
+)
+
+
+def judged_once(validate: AnswerValidator) -> AnswerValidator:
+    """Wrap a validator so an unchanged resubmission is refused unjudged.
+
+    A refusal the model acts on is the mechanism working: it reads what failed,
+    changes the code, submits again. A resubmission of the *identical* answer is
+    not — judging it again spends the task's clock to reach the answer already
+    given, and the trace it leaves reads as guessing against an oracle rather
+    than as fixing a bug.
+
+    One repeat is refused rather than the run ended: the iteration, token and
+    wall-clock guards already stop a task that goes nowhere, and a fourth
+    ceiling here would be a number to defend rather than a rule.
+
+    Benchmark-agnostic, because the rule is about the answer and not about how
+    it is judged: MBPP hands this an assertion run, SWE-bench a container one.
+    """
+    refused: str | None = None
+
+    def once(submitted: str) -> str | None:
+        nonlocal refused
+        if submitted == refused:
+            return UNCHANGED_ANSWER
+        verdict = validate(submitted)
+        refused = None if verdict is None else submitted
+        return verdict
+
+    return once
+
+
 # The MBPP ceiling the moulinette enforces, and the stricter of the two it
 # knows: SWE-bench allows 30 and its CLI passes that. A caller who forgets
 # cannot silently invalidate a run.
