@@ -23,7 +23,8 @@ def search_function_or_class_definition_in_code(
         directory: Root directory to search in (default: '.').
 
     Returns:
-        Formatted string of matches formatted as '/abs/path.py:<line> <type> <name>',
+        Formatted string of matches formatted as
+        '/abs/path.py:<line> <the def or class line as written>',
         or an informational error message.
     """
     root_path = Path(directory).resolve()
@@ -91,15 +92,25 @@ def _parse_and_find_definitions(
         return
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if isinstance(node, ast.FunctionDef):
-                node_type = "function"
-            elif isinstance(node, ast.AsyncFunctionDef):
-                node_type = "async_function"
-            else:
-                node_type = "class"
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and target_name in node.name
+        ):
+            # The line says `def`, `async def` or `class` itself, so a separate
+            # kind field would only repeat it.
+            written = _definition_line(content, node.lineno) or node.name
+            matches.append(f"{file_path.resolve()}:{node.lineno} {written}")
 
-            if target_name in node.name:
-                matches.append(
-                    f"{file_path.resolve()}:{node.lineno} {node_type} {node.name}"
-                )
+
+def _definition_line(content: str, lineno: int) -> str:
+    """The `def` or `class` line itself, as written.
+
+    Reporting the name alone answers with the string that was searched for.
+    The signature is what the caller needs next -- the parameters, the return
+    annotation -- and `search_code` already quotes the line it matched, so the
+    two tools read the same way.
+    """
+    lines = content.splitlines()
+    if 1 <= lineno <= len(lines):
+        return lines[lineno - 1].strip()
+    return ""
