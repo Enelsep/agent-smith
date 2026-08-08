@@ -7,7 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_smith.tools.run_tests import _parse_test_output, run_tests
+from agent_smith.tools.run_tests import (
+    PASSED_STATUS,
+    _parse_test_output,
+    run_tests,
+)
 
 
 class TestRunTestsTool(unittest.TestCase):
@@ -17,6 +21,19 @@ class TestRunTestsTool(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_a_bash_evaluation_script_runs(self) -> None:
+        # Every SWE-bench task ships its evaluation as bash: `set -o pipefail`,
+        # `source`, `conda activate`. Under /bin/sh -- dash on Debian and on
+        # the task images -- the script dies on its second line, so the tool
+        # reported FAILED for a repository that was fine. Measured on
+        # django__django-11066: "/bin/sh: 2: set: Illegal option -o pipefail".
+        script = "#!/bin/bash\nset -uxo pipefail\necho '1 passed'\n"
+
+        result = run_tests(eval_script=script, directory=str(self.root))
+
+        self.assertIn(PASSED_STATUS, result)
+        self.assertNotIn("Illegal option", result)
 
     def test_parse_pytest_output(self) -> None:
         pytest_raw = (

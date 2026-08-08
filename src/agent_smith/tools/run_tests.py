@@ -42,6 +42,12 @@ def run_tests(
         process = subprocess.run(
             eval_script,
             shell=True,
+            # A SWE-bench task ships its evaluation as a bash script: `set -o
+            # pipefail`, `source`, `conda activate`. `shell=True` alone runs it
+            # under /bin/sh, which is dash on Debian and on these images, and
+            # dash has none of the three -- so the task's own script died on
+            # its second line and no run could ever be judged by it.
+            executable="/bin/bash",
             cwd=str(root_path),
             capture_output=True,
             text=True,
