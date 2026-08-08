@@ -55,8 +55,13 @@ for id in "${TASKS[@]}"; do
       --env-file .env --provider-url "$URL" --model-name "$MODEL"
   done
 
-  # Re-pullable, and the disk is the binding constraint on how many tasks fit.
-  docker rmi "$(jq -r .docker_image "$T")" >/dev/null 2>&1 && echo "=== image dropped ==="
+  # Docker caches images perfectly well; this drops them because three
+  # SWE-bench images at several GB each do not fit beside one another on a
+  # laptop. Set DROP_IMAGES=0 where there is room, and a re-run of the same
+  # task costs no download.
+  if [ "${DROP_IMAGES:-1}" = 1 ]; then
+    docker rmi "$(jq -r .docker_image "$T")" >/dev/null 2>&1 && echo "=== image dropped ==="
+  fi
 done
 
 printf '\n| model | solved | input tokens | seconds |\n| --- | --- | --- | --- |\n'
