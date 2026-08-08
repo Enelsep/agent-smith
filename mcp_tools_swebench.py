@@ -24,6 +24,27 @@ def get_testbed_path() -> str:
     return os.environ.get("TESTBED_PATH", os.getcwd())
 
 
+# The repository root is `/testbed` inside the container, and the model writes
+# that prefix because the task statement and every listing show it. When the
+# server runs outside a container, TESTBED_PATH points somewhere else and the
+# same absolute paths have to land there instead.
+TESTBED_ROOT = "/testbed"
+
+# Every argument that carries a path. Rewriting them in one place at dispatch
+# keeps each tool branch free of the concern, and covers tools added later.
+PATH_ARGUMENTS = frozenset({"filepath", "directory", "workdir"})
+
+
+def in_testbed(path: str) -> str:
+    """Resolves a path written against the repository root."""
+    testbed = get_testbed_path()
+    if path == TESTBED_ROOT:
+        return testbed
+    if path.startswith(TESTBED_ROOT + "/"):
+        return os.path.join(testbed, path[len(TESTBED_ROOT) + 1 :])
+    return path
+
+
 # ------------------------------------------------------------------------------
 # Request Dispatcher
 # ------------------------------------------------------------------------------
@@ -171,6 +192,12 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     elif method == "tools/call":
         name = params.get("name")
         args = params.get("arguments", {}) or {}
+        args = {
+            key: in_testbed(value)
+            if key in PATH_ARGUMENTS and isinstance(value, str)
+            else value
+            for key, value in args.items()
+        }
 
         try:
             if name == "read_file":

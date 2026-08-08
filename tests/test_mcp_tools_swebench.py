@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from mcp_tools_swebench import _handle_request
+from mcp_tools_swebench import _handle_request, in_testbed
 
 
 def test_initialize() -> None:
@@ -84,3 +84,39 @@ def test_the_server_runs_on_the_copied_package_alone(tmp_path: Path) -> None:
 
     assert listed.returncode == 0, listed.stderr
     assert '"read_file"' in listed.stdout
+
+
+def test_an_absolute_testbed_path_lands_in_the_configured_testbed(
+    tmp_path: Path,
+) -> None:
+    # The model writes `/testbed/utils.py` because that is where the repository
+    # sits in the container, and the statement shows it that way. Run outside a
+    # container -- the sandbox exam does exactly this -- the same string has to
+    # reach TESTBED_PATH rather than a root directory that does not exist.
+    (tmp_path / "utils.py").write_text("def calculate_sum(): ...\n", encoding="utf-8")
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "list_files",
+            "arguments": {"directory": "/testbed", "pattern": "*.py"},
+        },
+    }
+
+    with patch.dict(os.environ, {"TESTBED_PATH": str(tmp_path)}):
+        resp = _handle_request(req)
+
+    assert resp is not None
+    assert "utils.py" in resp["result"]["content"][0]["text"]
+
+
+def test_a_path_outside_the_testbed_root_is_left_alone(tmp_path: Path) -> None:
+    # Only the `/testbed` prefix is ours to rewrite. `/tmp/agent` is a real
+    # location the sandbox policy allows, and mapping it would break it.
+    assert in_testbed("/tmp/agent/scratch.py") == "/tmp/agent/scratch.py"
+
+    with patch.dict(os.environ, {"TESTBED_PATH": str(tmp_path)}):
+        assert in_testbed("/testbed") == str(tmp_path)
+        assert in_testbed("/testbed/pkg/mod.py") == str(tmp_path / "pkg" / "mod.py")

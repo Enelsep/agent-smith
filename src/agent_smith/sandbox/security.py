@@ -448,6 +448,7 @@ _SAFE_BUILTINS = frozenset(
         "classmethod",
         "complex",
         "dict",
+        "dir",
         "divmod",
         "enumerate",
         "filter",
