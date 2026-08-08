@@ -35,4 +35,4 @@ target/
 
 # Matrix runs. Only the solution.json files backing BENCHMARK_REPORT.md are
 # committed, with git add -f (see CONTRIBUTING.md).
-benchmarks/runs/
+benchmarks/runs*/
