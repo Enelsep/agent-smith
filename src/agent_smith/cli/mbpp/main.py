@@ -11,8 +11,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from agent_smith.agent.loop import (
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_ITERATIONS,
@@ -21,6 +19,7 @@ from agent_smith.agent.loop import (
     run_task,
 )
 from agent_smith.agent.task import TaskSpec
+from agent_smith.cli import common
 from agent_smith.cli.common import build_provider, failed_run, write_solution
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError, resolve_config
@@ -59,19 +58,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def load_task(path: Path) -> MBPPTaskInput:
     """Read the task file, or say why it could not be read."""
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as unreadable:
-        raise ConfigError(
-            f"cannot read the task file {path}: {unreadable}"
-        ) from unreadable
-
-    try:
-        return MBPPTaskInput.model_validate_json(raw)
-    except ValidationError as malformed:
-        raise ConfigError(
-            f"{path} is not a valid MBPP task file: {malformed}"
-        ) from malformed
+    return common.load_task(path, MBPPTaskInput, "MBPP")
 
 
 def build_task_spec(task: MBPPTaskInput, system_prompt: str) -> TaskSpec:
