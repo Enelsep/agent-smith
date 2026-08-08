@@ -23,6 +23,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _tool_schema(tool: Any) -> dict[str, Any]:
+    """The tool's input schema, under whichever name the SDK gives it.
+
+    The wire field is `inputSchema`. The Python SDK exposes it under that name
+    up to 1.x and as `input_schema` from 2.0, and the server on the other end
+    of the transport may have been written against either.
+    """
+    for name in ("input_schema", "inputSchema"):
+        schema = getattr(tool, name, None)
+        if isinstance(schema, dict):
+            return schema
+    return {}
+
+
 class MCPConnectionError(Exception):
     """Raised internally when a transport or connection failure occurs."""
 
@@ -117,7 +131,7 @@ class UnifiedMCPClient(MCPClientProtocol):
                     MCPToolDefinition(
                         name=tool.name,
                         description=tool.description or "",
-                        input_schema=tool.input_schema or {},
+                        input_schema=_tool_schema(tool),
                     )
                     for tool in response.tools
                 ]

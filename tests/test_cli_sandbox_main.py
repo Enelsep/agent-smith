@@ -357,9 +357,9 @@ def test_a_server_that_never_answers_gives_up_rather_than_hanging() -> None:
 
 
 ECHO_SERVER = """
-from mcp.server import MCPServer
+from mcp.server.fastmcp import FastMCP
 
-server = MCPServer("probe")
+server = FastMCP("probe")
 
 
 @server.tool()
