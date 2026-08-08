@@ -14,6 +14,7 @@ from typing import Any
 
 from agent_smith.mcp.protocol import MCPToolDefinition
 from agent_smith.mcp.registry import MCPToolRegistry
+from agent_smith.mcp.wrapper import build_inspect_signature
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,27 @@ def create_tool_stub(
         A synchronous function mimicking the real tool's name and docstring.
     """
 
-    def stub(**kwargs: Any) -> str:
-        # We enforce kwargs because MCP input schemas define JSON objects.
+    signature, _ = build_inspect_signature(tool_def.input_schema)
+
+    def stub(*args: Any, **kwargs: Any) -> str:
+        # An MCP call is a JSON object, so the wire format is keyword-only. A
+        # model writing Python writes `read_file("path")` anyway, and the
+        # published schema says which parameter that is. The aliases the
+        # signature carries are deliberately dropped: the orchestrator-side
+        # wrapper does the sanitised-to-original renaming, and doing it twice
+        # here would send names that wrapper cannot bind.
+        if args:
+            try:
+                kwargs = dict(signature.bind(*args, **kwargs).arguments)
+            except TypeError as mismatch:
+                # What the model gets otherwise is eight frames of `inspect`
+                # internals with the useful sentence last, and this machine's
+                # paths along with it. Measured: a model calling `edit_file`
+                # with a SEARCH/REPLACE block as one argument repeated the
+                # identical call six turns running rather than read that.
+                # Same wording as the orchestrator side, which answers the
+                # same mistake made over the wire.
+                return f"Error: Invalid arguments for '{tool_def.name}': {mismatch}"
         logger.debug(
             f"Sandbox stub called for tool '{tool_def.name}' with args: {kwargs}"
         )

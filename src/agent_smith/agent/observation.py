@@ -4,7 +4,10 @@ from agent_smith.extraction import ExtractionResult
 from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
-NO_OUTPUT = "The code ran and printed nothing."
+NO_OUTPUT = (
+    "The code ran and printed nothing. A tool returns its result rather than "
+    "printing it, so wrap the call in print() to read it."
+)
 
 NAMESPACE_LOST = (
     "The sandbox restarted: every variable and function you defined earlier is "
