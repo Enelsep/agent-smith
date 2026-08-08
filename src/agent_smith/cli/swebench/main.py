@@ -181,7 +181,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             )
             return run_task(
                 spec,
-                build_provider(config),
+                build_provider(config, wall_clock_seconds=MAX_WALL_CLOCK_SECONDS),
                 sandbox,
                 max_iterations=args.max_iterations,
                 max_input_tokens=MAX_INPUT_TOKENS,
