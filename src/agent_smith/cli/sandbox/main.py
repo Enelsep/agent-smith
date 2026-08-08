@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agent_smith.cli.sandbox.mcp_bridge import MCPBridge, MCPBridgeError
-from agent_smith.cli.sandbox.repl import run_repl
+from agent_smith.cli.sandbox.repl import run_repl, run_script
 from agent_smith.config import ConfigError
 from agent_smith.config.loader import load_sandbox_config
 from agent_smith.mcp.formatter import to_sandbox_manual
@@ -171,4 +171,8 @@ def main() -> None:
         sandbox = session.enter_context(
             Sandbox.from_config(config, tool_defs=tool_defs, tool_handler=handler)
         )
-        run_repl(sandbox, banner=describe(sandbox, tool_defs))
+        banner = describe(sandbox, tool_defs)
+        if sys.stdin.isatty():
+            run_repl(sandbox, banner=banner)
+        else:
+            run_script(sandbox, sys.stdin.read(), banner=banner)

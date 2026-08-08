@@ -161,6 +161,30 @@ def run_repl(
             return
 
 
+def run_script(
+    sandbox: Sandbox,
+    source: str,
+    *,
+    banner: str = "",
+    write: Callable[[str], None] = print,
+) -> None:
+    """Run piped input as one entry, the way `python` runs a file.
+
+    The prompt ends a block on a blank line because that is the only signal a
+    typist can give. A file is not typed: blank lines sit inside `if` and `for`
+    bodies as ordinary formatting, and reading them as terminators chops the
+    block and leaves the rest of the body arriving as top-level statements that
+    cannot parse. So `cat tests.py | sandbox` runs the file whole.
+
+    One entry also means one timeout and one traceback for the whole script,
+    which is what running a file means everywhere else.
+    """
+    if banner:
+        write(banner)
+    if source.strip():
+        _run_entry(sandbox, source, write)
+
+
 def _run_entry(sandbox: Sandbox, source: str, write: Callable[[str], None]) -> None:
     """Run one finished entry and print whatever it had to say.
 
