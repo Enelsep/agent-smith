@@ -109,23 +109,30 @@ carries information the pass rate does not.
 **Two runs out of fifteen ran the tests before editing anything.** The other
 thirteen fixed the bug before reproducing it.
 
-One case is not open to interpretation. On `django-11066`, `devstral-medium-latest`
-opened with `edit_file`, on turn 1, having read nothing at all — quoting the exact
-path, the exact surrounding line and the exact one-keyword change. It failed only
-because the indentation it remembered was wrong; it then read the file and
-corrected its own recollection. Nothing it had observed could have located that
-line.
+That number says less about the models than it looks. The task input carries a
+`hints_text` field — the ticket's comment thread — and the prompt passes it
+through. On two of these three tasks it contains the answer:
 
-Elsewhere the reading is softer: the problem statement names the file and the
-symptom, so going straight to an edit can be comprehension rather than memory.
-But `sympy-13480` — where every model edits at step 1 or 2 and four finish in
-three to eight iterations — behaves like a task that was already known.
+| task | `hints_text` | what it says | first edit |
+| --- | --- | --- | --- |
+| `django-11066` | 2 075 chars | "the fix can really be `using=db` in the `.save()` method" | step 1–3 |
+| `sympy-13480` | 146 chars | "there is a typo on line 590: `cotm` should be `cothm`" | step 1–2 |
+| `sympy-14711` | 0 chars | — | steps 3, 5 and 26 |
 
-The honest consequence: **on these three tasks the pass rate measures training
-data as much as it measures the agent.** Any comparison against published
-SWE-bench figures is invalid for a second reason too — our agent is given the
-task's evaluation script and can iterate against it, which the canonical
-benchmark does not allow.
+The one task that gives nothing away is the one where the five models behave
+differently from each other. **A model that edits on turn 1 here has read the
+fix, not remembered it**, and no metric computed over the first two rows measures
+exploration.
+
+Using the field is not a shortcut we chose: it is part of the task the evaluation
+hands us, described in the contract as such, and dropping it would mean answering
+a different question than the one asked. But it means `sympy-14711` is the only
+one of our three tasks whose exploration numbers mean anything, and it is a single
+run per model.
+
+Any comparison against published SWE-bench figures is invalid for a second reason
+too — our agent is given the task's evaluation script and can iterate against it,
+which the canonical benchmark does not allow.
 
 ### Submission discipline — iterations between the tests passing and `final_answer`
 
@@ -262,10 +269,11 @@ we do not accept, at a token cost the other four do not pay.
 Three tasks and one run each. No result here separates two models whose scores
 differ by one task.
 
-The tasks are public commits these models have seen, and thirteen of fifteen runs
-fixed the bug without reproducing it first. What is measured is closer to
-"recognises this bug and can drive the tools" than to "can debug an unfamiliar
-repository". A task outside the training data of all five models would measure the
+Two of the three tasks ship a `hints_text` that names the fix, so thirteen of
+fifteen runs edited before reproducing anything. What is measured on those two is
+closer to "can follow a diagnosis and drive the tools" than to "can debug an
+unfamiliar repository". A task with no hints — and outside the training data of
+all five models — would measure the
 second, and we do not have one.
 
 ---
