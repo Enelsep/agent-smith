@@ -413,3 +413,21 @@ def test_the_bridged_tools_reach_sandboxed_code_as_functions() -> None:
         bridge.close()
 
     assert "contents of a.py" in result.stdout
+
+
+def test_a_stdio_server_is_spawned_with_the_environment_it_was_launched_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The SWE-bench server reads TESTBED_PATH to find the repository, and the
+    # documented way to set it is on the sandbox command line. The transport's
+    # own default inherits six variables and TESTBED_PATH is not among them.
+    monkeypatch.setenv("TESTBED_PATH", "/somewhere/testbed")
+
+    from agent_smith.mcp.client import UnifiedMCPClient
+
+    args = cli.parse_args(["--mcp-stdio", "python mcp_tools_swebench.py"])
+    client = cli.build_client(args)
+
+    assert isinstance(client, UnifiedMCPClient)
+    assert client.env is not None
+    assert client.env["TESTBED_PATH"] == "/somewhere/testbed"
