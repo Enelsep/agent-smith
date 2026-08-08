@@ -299,6 +299,7 @@ def _stub_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "UnifiedMCPClient", record)
     monkeypatch.setattr(cli, "MCPBridge", _Bridge)
+
     def provider(config, **kwargs):  # type: ignore[no-untyped-def]
         PROVIDER_KWARGS.clear()
         PROVIDER_KWARGS.update(kwargs)
