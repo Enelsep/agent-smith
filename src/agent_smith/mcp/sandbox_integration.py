@@ -53,7 +53,17 @@ def create_tool_stub(
         # wrapper does the sanitised-to-original renaming, and doing it twice
         # here would send names that wrapper cannot bind.
         if args:
-            kwargs = dict(signature.bind(*args, **kwargs).arguments)
+            try:
+                kwargs = dict(signature.bind(*args, **kwargs).arguments)
+            except TypeError as mismatch:
+                # What the model gets otherwise is eight frames of `inspect`
+                # internals with the useful sentence last, and this machine's
+                # paths along with it. Measured: a model calling `edit_file`
+                # with a SEARCH/REPLACE block as one argument repeated the
+                # identical call six turns running rather than read that.
+                # Same wording as the orchestrator side, which answers the
+                # same mistake made over the wire.
+                return f"Error: Invalid arguments for '{tool_def.name}': {mismatch}"
         logger.debug(
             f"Sandbox stub called for tool '{tool_def.name}' with args: {kwargs}"
         )

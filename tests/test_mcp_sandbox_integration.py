@@ -62,6 +62,34 @@ class TestMCPSandboxIntegration(unittest.IsolatedAsyncioTestCase):
             "read_file", {"filepath": "app.py", "end_line": 40}
         )
 
+    def test_a_call_that_does_not_fit_the_schema_says_so_in_one_line(self) -> None:
+        # A traceback out of `inspect` is not something a model can act on: it
+        # reads eight frames of internals, and this machine's paths with them.
+        # Measured on a real run, a model that got one repeated the identical
+        # malformed call six turns running.
+        tool_def = MCPToolDefinition(
+            name="edit_file",
+            description="Replace text in a file.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string"},
+                    "old_str": {"type": "string"},
+                    "new_str": {"type": "string"},
+                },
+                "required": ["filepath", "old_str", "new_str"],
+            },
+        )
+        mock_ipc = MagicMock()
+        stub = create_tool_stub(tool_def, mock_ipc)
+
+        answer = stub("app.py", "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
+
+        assert answer.startswith("Error: Invalid arguments for 'edit_file'")
+        assert "new_str" in answer
+        assert "Traceback" not in answer
+        mock_ipc.assert_not_called()
+
     def test_get_sandbox_tool_stubs(self) -> None:
         mock_ipc = MagicMock()
         stubs = get_sandbox_tool_stubs([self.tool_def], mock_ipc)
