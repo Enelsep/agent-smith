@@ -21,6 +21,14 @@
         "codestral-2508": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
+        },
+        "devstral-medium-latest": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        },
+        "magistral-small-latest": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
         }
       }
     },
