@@ -21,7 +21,9 @@ OUT=${OUT:-benchmarks/runs}
 TASKS=(django__django-11066 sympy__sympy-14711 sympy__sympy-13480)
 MODELS=(
   "https://api.mistral.ai/v1 mistral-medium-latest"
+  "https://api.mistral.ai/v1 devstral-medium-latest"
   "https://api.mistral.ai/v1 codestral-2508"
+  "https://api.mistral.ai/v1 magistral-small-latest"
   "https://openrouter.ai/api/v1 qwen/qwen3-235b-a22b-2507"
 )
 
@@ -48,7 +50,6 @@ for id in "${TASKS[@]}"; do
     mkdir -p "$(dirname "$S")"
     uv run python -m agent_swebench --task-file "$T" --output "$S" \
       --env-file .env --provider-url "$URL" --model-name "$MODEL"
-    sleep 5
   done
 
   # Re-pullable, and the disk is the binding constraint on how many tasks fit.
