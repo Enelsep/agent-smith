@@ -30,6 +30,19 @@ if TYPE_CHECKING:
     from agent_smith.agent.task import TaskSpec
     from agent_smith.llm import LLMProvider
 
+REPEATED_CODE = (
+    "This block is character for character the one that just ran, so it was not "
+    "run again: the same code against the same state gives the same result. The "
+    "observation above is still the answer. Change something before sending it."
+)
+"""Why a repeat is worth a turn's feedback rather than an execution.
+
+The input ceiling is cumulative — every iteration re-sends the transcript, so a
+run's cost grows with the square of its length — and a repeated block buys
+nothing with that spend. Measured over MBPP's 257 tasks: one model repeated
+itself on 13 runs, 18 turns in all, while another never did once."""
+
+
 # The MBPP ceiling the moulinette enforces, and the stricter of the two it
 # knows: SWE-bench allows 30 and its CLI passes that. A caller who forgets
 # cannot silently invalidate a run.
@@ -139,6 +152,10 @@ class _Run:
         self.solution = ""
         self.success = False
         self.error: str | None = None
+        # The last block the sandbox actually ran, for the repeat guard. Only
+        # the last: a block re-run after something else happened in between can
+        # legitimately answer differently.
+        self._ran: str | None = None
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         # What the guard needs to convert its estimates into the billed
@@ -253,12 +270,25 @@ class _Run:
             )
             self.history.append({"role": "assistant", "content": answer.text})
             extracted = extract_code(answer.text, step=step)
-            if extracted.code is None:
+            # Not on a forced turn. There, the block in hand is the last one
+            # the run will ever get, and refusing it ends the task with nothing
+            # rather than with the answer the model was about to repeat.
+            repeated = (
+                reason is None
+                and extracted.code is not None
+                and extracted.code == self._ran
+            )
+            if extracted.code is None or repeated:
                 # Nothing ran, so both sandbox fields stay empty: `StepMetrics`
                 # documents that as correct for a step with no execution.
-                said = observation.from_extraction(extracted)
+                said = (
+                    REPEATED_CODE
+                    if repeated
+                    else observation.from_extraction(extracted)
+                )
                 self._record(step, answer, sandbox_input="", sandbox_output="")
             else:
+                self._ran = extracted.code
                 before = sandbox.restarts
                 executed = sandbox.execute(extracted.code)
                 if executed.outcome is Outcome.FINAL_ANSWER and executed.final_answer:
@@ -271,6 +301,11 @@ class _Run:
                         observation.combined_output(executed),
                     )
                     return
+                if sandbox.restarts != before:
+                    # The namespace this block ran against is gone, so sending
+                    # it again is how a model rebuilds what it had. That is a
+                    # repeat the guard must not refuse.
+                    self._ran = None
                 said = observation.from_execution(
                     executed,
                     namespace_lost=sandbox.restarts != before,
