@@ -18,7 +18,10 @@
 cd "$(dirname "$0")/.." || exit 1
 OUT=${OUT:-benchmarks/runs}
 
-TASKS=(django__django-11066 sympy__sympy-14711 sympy__sympy-13480)
+# Overridable so a pass can be staged one task at a time, which is how the
+# disk survives: an image is several GB and only one has to be resident.
+# shellcheck disable=SC2206
+TASKS=(${TASKS:-django__django-11066 sympy__sympy-14711 sympy__sympy-13480})
 MODELS=(
   "https://api.mistral.ai/v1 mistral-medium-latest"
   "https://api.mistral.ai/v1 devstral-medium-latest"
