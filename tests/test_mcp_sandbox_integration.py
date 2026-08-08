@@ -38,6 +38,30 @@ class TestMCPSandboxIntegration(unittest.IsolatedAsyncioTestCase):
             "test_tool", {"target_file": "app.py", "limit": 10}
         )
 
+    def test_stub_names_positional_arguments_from_the_schema(self) -> None:
+        # A model writes `read_file("app.py", end_line=40)`; the schema says
+        # which parameter the bare string is, and the wire format is keyword.
+        tool_def = MCPToolDefinition(
+            name="read_file",
+            description="Read a file.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string"},
+                    "start_line": {"type": "integer"},
+                    "end_line": {"type": "integer"},
+                },
+                "required": ["filepath"],
+            },
+        )
+        mock_ipc = MagicMock(return_value="contents")
+        stub = create_tool_stub(tool_def, mock_ipc)
+
+        self.assertEqual(stub("app.py", end_line=40), "contents")
+        mock_ipc.assert_called_once_with(
+            "read_file", {"filepath": "app.py", "end_line": 40}
+        )
+
     def test_get_sandbox_tool_stubs(self) -> None:
         mock_ipc = MagicMock()
         stubs = get_sandbox_tool_stubs([self.tool_def], mock_ipc)

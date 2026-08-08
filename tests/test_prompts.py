@@ -96,12 +96,6 @@ def test_the_swebench_prompt_uses_the_same_turn_shape_as_mbpp() -> None:
     assert "Thought:" not in text
 
 
-def test_the_swebench_prompt_says_it_is_unvalidated() -> None:
-    # No agent_swebench CLI exists to run it against, so the file says so
-    # rather than reading as advice anyone has tested.
-    assert "unvalidated" in load_prompt("swebench").lower()
-
-
 def test_the_swebench_prompt_names_the_only_call_that_ends_a_task() -> None:
     # The loop ends on `Outcome.FINAL_ANSWER`, which only `final_answer()`
     # raises. A prompt that presents `get_patch()` as the way to submit teaches

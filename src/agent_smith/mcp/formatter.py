@@ -92,8 +92,9 @@ NO_TOOLS_MANUAL = (
 
 MANUAL_PREAMBLE = (
     "Available in the sandbox namespace as ordinary Python functions. Each "
-    "takes keyword arguments and returns a string. They run outside the "
-    "sandbox, so its import and file restrictions do not apply to their work."
+    "returns a string rather than printing it: wrap the call in print() to "
+    "read the result. They run outside the sandbox, so its import and file "
+    "restrictions do not apply to their work."
 )
 
 SUMMARY_LIMIT = 110
