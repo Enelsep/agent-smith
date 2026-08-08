@@ -148,7 +148,9 @@ patch the agent had never watched succeed**, three of which the evaluation scrip
 then accepted. Without the harness judging the submission, three of our twelve
 passes would have been luck reported as competence.
 
-## 5. Ablation — the tool protocol
+## 5. Ablations
+
+### The tool protocol
 
 Same task (`django-11066`), same five models, same ceilings; three passes, changing
 only the harness between them.
@@ -180,6 +182,47 @@ The lesson generalises past this project. Every defect above was invisible in th
 test suite, which was green throughout, and every one of them cost whole tasks.
 They only appeared in the traces of real runs.
 
+### The argument-error message
+
+`devstral-medium-latest` is the one model that exhausted its output budget, so it
+is the one this second ablation runs on. The trace named the cause, and it was not
+verbosity: it called `edit_file` with an Aider-style `<<<<<<< SEARCH … >>>>>>>
+REPLACE` block as a single positional argument, and what came back was an
+eight-frame `inspect` traceback with the one useful sentence last. It then repeated
+the identical call. The intervention is one line — bind positionally against the
+published schema, and on a mismatch answer `Error: Invalid arguments for
+'edit_file': missing a required argument: 'new_str'` instead of the traceback.
+
+One task, one model, one run each; every other variable held.
+
+| | baseline | readable error |
+| --- | --- | --- |
+| turns | 16 | 30 |
+| turns carrying code | 14 | 22 |
+| distinct code blocks | 8 | 22 |
+| turns in `SEARCH/REPLACE` form | 6 | 0 |
+| tracebacks returned | 4 | 1 |
+| output tokens | 10 000, exhausted | 2 978 |
+| stopped by | the output budget | the iteration ceiling |
+| correct fix written | yes | no |
+| task solved | no | no |
+
+**It did what it targeted and nothing more.** The malformed form disappears, and
+with it the loop: no code block is repeated in the second run, where the first
+repeated six of fourteen. Output spend falls by 70 %, and the budget guard stops
+being the binding constraint.
+
+**And the run came out worse where it counts.** The baseline had written the
+correct `db_manager(db)` fix and died holding it; the second run explores wider,
+touches the right method twice, and never lands it. Neither run solved the task, so
+the pass rate is 0/1 either way, but the patch regressed.
+
+Two readings fit and one run cannot separate them: either the enforced turn budget
+was doing accidental work by cutting off exploration near a patch devstral already
+had, or the difference is the ordinary variance of one sample. What the ablation
+does establish is narrower and still worth having — the harness defect was real,
+it is gone, and devstral's failure on this task is now devstral's.
+
 ## 6. Conclusions
 
 **Ship `magistral-small-latest`, with `qwen/qwen3-235b-a22b-2507` as the second.**
@@ -206,11 +249,13 @@ it explored until nothing was left to submit with.
 **Discard `codestral-2508`.** 2/3, and the weakest submission discipline: it never
 saw a passing test on two of three tasks.
 
-**Hold `devstral-medium-latest`.** 2/3, and its one failure is a fixable
-characteristic rather than a capability limit — it spent the whole 10 000-token
-output budget in sixteen turns, roughly 625 tokens a turn, on a task whose patch it
-had right. A prompt that constrains its verbosity is worth measuring before the
-model is dismissed.
+**Hold `devstral-medium-latest`.** 2/3, and its one failure looked like a fixable
+characteristic: it spent the whole 10 000-token output budget in sixteen turns, on
+a task whose patch it had right. Section 5 measured it. The budget went to a
+malformed tool call answered with a traceback, not to verbosity, and repairing that
+removed the waste without making the task pass. The hold stands for a different
+reason than it was written: what remains is a model that reaches for a tool format
+we do not accept, at a token cost the other four do not pay.
 
 ### What this report does not establish
 
