@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from agent_smith.agent import budget, observation
+from agent_smith.agent import budget, loop, observation
 from agent_smith.agent.history import TRUNCATION_MARKER
 from agent_smith.agent.loop import run_task
 from agent_smith.agent.task import TaskSpec
@@ -1286,3 +1286,45 @@ def test_a_truncated_reply_is_named_even_when_its_code_ran() -> None:
     run_task(a_task(), provider, sandbox, clock=FakeClock())
 
     assert "cut off at its token limit" in provider.calls[1][-1]["content"]
+
+
+class TestAnUnchangedResubmissionIsNotJudgedTwice:
+    def test_the_same_answer_is_refused_without_being_judged_again(self) -> None:
+        # Measured: a model that gets refused and resubmits the identical patch
+        # has done nothing in between, so the verdict cannot differ. Re-running
+        # a container evaluation to learn that spends the task's clock.
+        judged: list[str] = []
+
+        def validate(submitted: str) -> str | None:
+            judged.append(submitted)
+            return "the tests did not pass"
+
+        once = loop.judged_once(validate)
+
+        assert once("patch A") == "the tests did not pass"
+        assert once("patch A") == loop.UNCHANGED_ANSWER
+        assert judged == ["patch A"]
+
+    def test_a_changed_answer_is_judged_on_its_own_merits(self) -> None:
+        # The refusal doing its job: the model acted on it. Nothing here may
+        # penalise that, however many times it takes.
+        judged: list[str] = []
+
+        def validate(submitted: str) -> str | None:
+            judged.append(submitted)
+            return None if submitted == "patch C" else "no"
+
+        once = loop.judged_once(validate)
+
+        assert once("patch A") == "no"
+        assert once("patch B") == "no"
+        assert once("patch C") is None
+        assert judged == ["patch A", "patch B", "patch C"]
+
+    def test_an_accepted_answer_leaves_nothing_to_refuse(self) -> None:
+        # Only a refusal is remembered. An answer that was accepted and somehow
+        # comes round again must not be turned away by this.
+        once = loop.judged_once(lambda submitted: None)
+
+        assert once("patch A") is None
+        assert once("patch A") is None

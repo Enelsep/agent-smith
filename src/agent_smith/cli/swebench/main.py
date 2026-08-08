@@ -21,7 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from agent_smith.agent.loop import AnswerValidator, run_task
+from agent_smith.agent.loop import AnswerValidator, judged_once, run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.cli.common import build_provider, failed_run, write_solution
 from agent_smith.cli.sandbox.mcp_bridge import MCPBridge
@@ -238,7 +238,9 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=remaining_wall_clock(time.monotonic() - started),
                 max_tokens_per_call=config.max_tokens,
-                validate_answer=build_validator(task, bridge.call, testbed),
+                validate_answer=judged_once(
+                    build_validator(task, bridge.call, testbed)
+                ),
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return _failed(task.instance_id, f"the run could not start: {unexpected}")
