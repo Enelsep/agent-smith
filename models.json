@@ -12,7 +12,7 @@
     },
     "mistral": {
       "base_url": "https://api.mistral.ai/v1",
-      "default_model": "mistral-medium-latest",
+      "default_model": "magistral-small-latest",
       "models": {
         "mistral-medium-latest": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
