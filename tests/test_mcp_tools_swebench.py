@@ -120,3 +120,31 @@ def test_a_path_outside_the_testbed_root_is_left_alone(tmp_path: Path) -> None:
     with patch.dict(os.environ, {"TESTBED_PATH": str(tmp_path)}):
         assert in_testbed("/testbed") == str(tmp_path)
         assert in_testbed("/testbed/pkg/mod.py") == str(tmp_path / "pkg" / "mod.py")
+
+
+def test_the_search_tools_look_in_the_testbed_not_the_working_directory(
+    tmp_path: Path,
+) -> None:
+    # They take no directory from the model: there is one repository to search.
+    # Their own default is `.`, which is the testbed only while the container
+    # happens to run the server there.
+    (tmp_path / "utils.py").write_text(
+        "def calculate_sum(values):\n    return sum(values)\n", encoding="utf-8"
+    )
+
+    def call(tool: str, arguments: dict[str, object]) -> str:
+        request = {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
+        with patch.dict(os.environ, {"TESTBED_PATH": str(tmp_path)}):
+            resp = _handle_request(request)
+        assert resp is not None
+        return str(resp["result"]["content"][0]["text"])
+
+    assert "utils.py" in call("search_code", {"pattern": "calculate_sum"})
+    assert "utils.py" in call(
+        "search_function_or_class_definition_in_code", {"name": "calculate_sum"}
+    )

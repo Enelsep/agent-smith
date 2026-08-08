@@ -227,11 +227,17 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 sc_kwargs: dict[str, Any] = {}
                 if "file_pattern" in args and args["file_pattern"] is not None:
                     sc_kwargs["file_pattern"] = str(args["file_pattern"])
-                output = search_code(pattern, **sc_kwargs)
+                # The three search tools take no directory from the model --
+                # there is only one repository to search. They default to `.`,
+                # which is the testbed only because the container runs us
+                # there; naming it holds wherever the server is started.
+                output = search_code(pattern, directory=testbed, **sc_kwargs)
 
             elif name == "search_function_or_class_definition_in_code":
                 sym_name = str(args.get("name", ""))
-                output = search_function_or_class_definition_in_code(sym_name)
+                output = search_function_or_class_definition_in_code(
+                    sym_name, directory=testbed
+                )
 
             elif name == "find_references":
                 sym_name = str(args.get("name", ""))
@@ -240,7 +246,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                     fr_kwargs["filepath"] = str(args["filepath"])
                 if "line" in args and args["line"] is not None:
                     fr_kwargs["line"] = int(args["line"])
-                output = find_references(sym_name, **fr_kwargs)
+                output = find_references(sym_name, directory=testbed, **fr_kwargs)
 
             elif name == "run_tests":
                 directory = str(args.get("directory", testbed))
