@@ -38,6 +38,48 @@ class TestMCPSandboxIntegration(unittest.IsolatedAsyncioTestCase):
             "test_tool", {"target_file": "app.py", "limit": 10}
         )
 
+    def test_a_positional_call_lands_on_the_schema_order(self) -> None:
+        # `search_code("coth", file_pattern="hyperbolic.py")` is what a model
+        # writes. Refusing it raised a TypeError naming an internal function,
+        # which tells the model nothing it can act on: 117 steps out of 240 in
+        # one campaign, and one model spent all thirty iterations there without
+        # ever reaching `run_tests`.
+        searcher = MCPToolDefinition(
+            name="search_code",
+            description="Search",
+            input_schema={
+                "type": "object",
+                "properties": {"pattern": {}, "file_pattern": {}, "directory": {}},
+            },
+        )
+        mock_ipc = MagicMock(return_value="found")
+        stub = create_tool_stub(searcher, mock_ipc)
+
+        assert stub("coth", file_pattern="hyperbolic.py") == "found"
+        mock_ipc.assert_called_once_with(
+            "search_code", {"pattern": "coth", "file_pattern": "hyperbolic.py"}
+        )
+
+    def test_the_same_argument_twice_is_named_rather_than_raised(self) -> None:
+        searcher = MCPToolDefinition(
+            name="search_code",
+            description="Search",
+            input_schema={"type": "object", "properties": {"pattern": {}}},
+        )
+        stub = create_tool_stub(searcher, MagicMock())
+
+        answer = stub("coth", pattern="cotm")
+
+        assert "pattern" in answer
+        assert "twice" in answer
+
+    def test_more_arguments_than_the_schema_has_says_so(self) -> None:
+        stub = create_tool_stub(self.tool_def, MagicMock())
+
+        answer = stub("one", "two")
+
+        assert "at most 0 arguments" in answer
+
     def test_get_sandbox_tool_stubs(self) -> None:
         mock_ipc = MagicMock()
         stubs = get_sandbox_tool_stubs([self.tool_def], mock_ipc)
