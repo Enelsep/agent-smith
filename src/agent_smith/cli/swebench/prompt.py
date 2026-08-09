@@ -27,9 +27,10 @@ def build_system_prompt(tools: list[MCPToolDefinition]) -> str:
 def task_prompt(task: SWEBenchTaskInput, testbed: str = "/testbed") -> str:
     """The one issue, in the order a fixer needs it.
 
-    The evaluation script is quoted in full because `run_tests(eval_script,
-    directory)` takes it as an argument: a model that has not been given the
-    text cannot call the tool that decides whether it is done.
+    `run_tests()` takes no arguments — the harness leaves the task's own
+    evaluation script in the container — so the script is named here rather
+    than quoted. That is worth roughly two thousand characters a task against a
+    cumulative input ceiling, and it removes every way a retype can go wrong.
 
     `testbed` is where the checkout lives inside the container. Every tool
     defaults to the working directory, so a model that has to guess the path
@@ -42,9 +43,5 @@ def task_prompt(task: SWEBenchTaskInput, testbed: str = "/testbed") -> str:
     parts.append(task.problem_statement)
     if task.hints_text:
         parts += ["", "Hints:", task.hints_text]
-    parts += [
-        "",
-        "Run the tests with run_tests, passing this script:",
-        task.eval_script,
-    ]
+    parts += ["", "Run the tests with run_tests(). It takes no arguments."]
     return "\n".join(parts).strip()

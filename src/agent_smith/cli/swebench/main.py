@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -52,6 +53,13 @@ SERVER_IN_CONTAINER = "/mcp_tools_swebench.py"
 # dependency of ours inside the image.
 PACKAGE_SOURCE = Path(__file__).resolve().parents[2]
 PACKAGE_PARENT_IN_CONTAINER = "/"
+
+# The task's evaluation script, carried into the container so `run_tests()`
+# needs no argument. Asking the model for it cost us every failure mode a
+# 2 000-character retype can have: one dropped a heredoc and bash died at EOF,
+# one passed `/bin/bash` and stalled the tool for a full timeout, one truncated
+# it past the output markers and got a verdict by accident.
+EVAL_SCRIPT_IN_CONTAINER = "/eval_script.sh"
 
 UNKNOWN_TASK_ID = "unknown"
 
@@ -93,9 +101,7 @@ def build_validator(
             # Nothing to judge against. Refusing every answer would be worse
             # than accepting one that was never checked.
             return None
-        ran = call_tool(
-            "run_tests", {"eval_script": task.eval_script, "directory": testbed}
-        )
+        ran = call_tool("run_tests", {"directory": testbed})
         if PASSED_STATUS in ran:
             return None
         return REFUSED.format(failure=ran)
@@ -191,6 +197,14 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             session.callback(container.cleanup)
             container.copy_in(SERVER_SOURCE, SERVER_IN_CONTAINER)
             container.copy_in(PACKAGE_SOURCE, PACKAGE_PARENT_IN_CONTAINER)
+
+            if task.eval_script.strip():
+                script = (
+                    Path(session.enter_context(tempfile.TemporaryDirectory()))
+                    / "eval_script.sh"
+                )
+                script.write_text(task.eval_script, encoding="utf-8")
+                container.copy_in(script, EVAL_SCRIPT_IN_CONTAINER)
 
             # Where the checkout actually is, asked of the image rather than
             # assumed: the tools all default to the working directory, and the

@@ -220,3 +220,56 @@ def test_a_context_search_runs_against_the_testbed(tmp_path: Path) -> None:
     # second line is the round trip this tool exists to save.
     assert "4> def calculate_sum(values):" in text
     assert "return sum(values)" in text
+
+
+def test_run_tests_uses_the_script_the_harness_left_when_given_none(
+    tmp_path: Path,
+) -> None:
+    # `run_tests()` with no argument is the whole point: a model asked for two
+    # thousand characters of bash gets it wrong in every way bash allows. One
+    # dropped a heredoc, one passed `/bin/bash` and stalled the tool for a full
+    # timeout, one truncated it past the output markers and was handed a
+    # verdict by accident.
+    script = tmp_path / "eval_script.sh"
+    script.write_text("echo '7 passed'\n", encoding="utf-8")
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {"name": "run_tests", "arguments": {}},
+    }
+
+    with patch.dict(
+        os.environ, {"EVAL_SCRIPT_PATH": str(script), "TESTBED_PATH": str(tmp_path)}
+    ):
+        resp = _handle_request(req)
+
+    assert resp is not None
+    assert "7 passed, 0 failed" in resp["result"]["content"][0]["text"]
+
+
+def test_a_script_the_model_does_pass_still_wins(tmp_path: Path) -> None:
+    # The argument stays accepted. A model that wants to run one file rather
+    # than the whole suite is doing something reasonable, and the harness's own
+    # verdict is taken separately.
+    script = tmp_path / "eval_script.sh"
+    script.write_text("echo '7 passed'\n", encoding="utf-8")
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "run_tests",
+            "arguments": {"eval_script": "echo '2 passed'"},
+        },
+    }
+
+    with patch.dict(
+        os.environ, {"EVAL_SCRIPT_PATH": str(script), "TESTBED_PATH": str(tmp_path)}
+    ):
+        resp = _handle_request(req)
+
+    assert resp is not None
+    assert "2 passed, 0 failed" in resp["result"]["content"][0]["text"]
