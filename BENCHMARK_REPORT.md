@@ -230,6 +230,40 @@ had, or the difference is the ordinary variance of one sample. What the ablation
 does establish is narrower and still worth having — the harness defect was real,
 it is gone, and devstral's failure on this task is now devstral's.
 
+### The method section of the prompt
+
+The only one of the three with a proper control: the same commit of the same
+tree, run twice, differing by eighteen lines of `prompts/swebench.md` and nothing
+else. Five models, one task — `sympy-14711`, the only one of ours whose
+`hints_text` is empty, so the only one where a method has anything to do.
+
+The lines come from solving that task by hand through our own tools: search for
+the symbol the error names, read a window rather than the file, reproduce the
+failure before changing anything, ask what the fix does to the input that failed.
+Nothing about the repository or the bug, so what the prompt gains is an order of
+gestures and not an answer.
+
+| | control | with the method |
+| --- | --- | --- |
+| reproduced the failure before editing | 2/5 | **5/5** |
+| median step of the first edit | 3 | 5 |
+| tasks solved | 3/5 | 3/5 |
+
+**The behaviour it asks for is the behaviour that changed.** Every model that
+could flip did, none flipped back. And the control replicates: an earlier pass on
+a different tree also put this at 2/5, so 2/5 is what this metric reads without
+the section and 5/5 is what it reads with it.
+
+**The pass rate says nothing here, and the control is what proves it.** Both
+sides solve three of five — but not the same three. `devstral` goes from failure
+to success, `mistral-medium` from success to failure, and on the control
+`magistral` solves in 8 iterations where an earlier run took 12. One run per cell
+does not measure a pass rate on this task, in either direction, and an ablation
+that claimed one from these numbers would be reading noise.
+
+So: measured change in method, no measurable change in score. Backing files under
+`benchmarks/runs-prompt/`.
+
 ## 6. Conclusions
 
 **Ship `magistral-small-latest`, with `qwen/qwen3-235b-a22b-2507` as the second.**
@@ -279,4 +313,5 @@ second, and we do not have one.
 ---
 
 *Runs produced by `benchmarks/swe-matrix.sh`; backing files under
-`benchmarks/runs-valid/`.*
+`benchmarks/runs-valid/`, `benchmarks/runs-ablation/` and
+`benchmarks/runs-prompt/`.*
