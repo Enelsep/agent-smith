@@ -153,3 +153,15 @@ def test_a_script_that_died_on_its_own_syntax_does_not_pass() -> None:
     result = run_tests(eval_script="echo '4 passed'; exit 2", directory=".")
 
     assert FAILED_STATUS in result
+
+
+def test_a_failure_the_parser_cannot_read_still_carries_its_output() -> None:
+    # A script that exits 0 having printed a format we do not parse: the
+    # sympy case, where the counts come out 0 and 0. The verdict is FAILED and
+    # the output is what the model has to work from, so it has to be there.
+    result = run_tests(
+        eval_script="echo 'test_coth E'; echo '1 exceptions'", directory="."
+    )
+
+    assert FAILED_STATUS in result
+    assert "test_coth E" in result
