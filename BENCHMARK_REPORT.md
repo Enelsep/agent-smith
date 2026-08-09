@@ -10,7 +10,7 @@ measured, and the intermediary metrics are what say so.
 
 | model | provider | why it is here |
 | --- | --- | --- |
-| `mistral-medium-latest` | Mistral | the reference a peer implementation reports 8/8 with |
+| `mistral-medium-latest` | Mistral | Mistral's general mid-tier model, and our MBPP baseline at 233/257 |
 | `devstral-medium-latest` | Mistral | Mistral's software-engineering family, the a-priori favourite |
 | `codestral-2508` | Mistral | fastest of the three, expected weaker — a deliberate contrast |
 | `magistral-small-latest` | Mistral | small reasoning model, cheap enough to be worth testing |
