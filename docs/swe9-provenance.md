@@ -64,6 +64,7 @@ The distinction we hold to: the agent may use everything in the task it is
 given, and nothing from anywhere else. The first is the statement. The second is
 what the network cut now makes impossible rather than merely forbidden.
 
-The task with no hints, `sympy__sympy-14711`, is the one where the models
-diverge and the one our exam run failed — which is the shape you would expect if
-the hints, and not memorisation, are what drive the early edits.
+The task with no hints, `sympy__sympy-14711`, is the one where the five models
+behave least alike — first edits at steps 3, 5 and 26 — and the one they fail
+most often. That is the shape you would expect if the hints, and not
+memorisation, are what drive the early edits.
