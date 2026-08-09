@@ -9,6 +9,18 @@ from unittest.mock import patch
 
 from mcp_tools_swebench import _handle_request, in_testbed
 
+MANDATORY = {
+    "read_file",
+    "edit_file",
+    "list_files",
+    "search_code",
+    "search_function_or_class_definition_in_code",
+    "find_references",
+    "run_tests",
+    "get_patch",
+    "run_command",
+}
+
 
 def test_initialize() -> None:
     req = {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
@@ -23,10 +35,10 @@ def test_tools_list() -> None:
     assert resp is not None
     tools = resp["result"]["tools"]
     tool_names = [t["name"] for t in tools]
-    assert len(tool_names) == 9
-    assert "read_file" in tool_names
-    assert "edit_file" in tool_names
-    assert "run_command" in tool_names
+    # The nine the subject makes mandatory, by name rather than by count: extra
+    # tools are explicitly allowed, so a count would fail on a permitted change
+    # while a missing mandatory one would slip through.
+    assert MANDATORY <= set(tool_names)
 
 
 def test_tools_call_run_command() -> None:
@@ -148,3 +160,41 @@ def test_the_search_tools_look_in_the_testbed_not_the_working_directory(
     assert "utils.py" in call(
         "search_function_or_class_definition_in_code", {"name": "calculate_sum"}
     )
+
+
+def test_the_two_extra_tools_are_offered_beside_the_nine_mandatory_ones() -> None:
+    # The subject fixes nine and says "you may implement any additional tools
+    # you consider useful". These two each answer a failure we measured.
+    resp = _handle_request({"jsonrpc": "2.0", "id": 6, "method": "tools/list"})
+
+    assert resp is not None
+    names = [tool["name"] for tool in resp["result"]["tools"]]
+    assert "search_code_with_context" in names
+    assert "write_file" in names
+    assert MANDATORY <= set(names)
+
+
+def test_a_context_search_runs_against_the_testbed(tmp_path: Path) -> None:
+    (tmp_path / "utils.py").write_text(
+        "import re\n\n\ndef calculate_sum(values):\n    return sum(values)\n",
+        encoding="utf-8",
+    )
+    req = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "search_code_with_context",
+            "arguments": {"pattern": "calculate_sum", "context_lines": 1},
+        },
+    }
+
+    with patch.dict(os.environ, {"TESTBED_PATH": str(tmp_path)}):
+        resp = _handle_request(req)
+
+    assert resp is not None
+    text = resp["result"]["content"][0]["text"]
+    # The matching line marked, and the line under it carried along: that
+    # second line is the round trip this tool exists to save.
+    assert "4> def calculate_sum(values):" in text
+    assert "return sum(values)" in text

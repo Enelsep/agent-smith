@@ -14,9 +14,11 @@ from agent_smith.tools.read_file import read_file
 from agent_smith.tools.run_command import run_command
 from agent_smith.tools.run_tests import run_tests
 from agent_smith.tools.search_code import search_code
+from agent_smith.tools.search_context import search_code_with_context
 from agent_smith.tools.search_definition import (
     search_function_or_class_definition_in_code,
 )
+from agent_smith.tools.write_file import write_file
 
 
 def get_testbed_path() -> str:
@@ -130,6 +132,31 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                     },
                 },
                 {
+                    "name": "search_code_with_context",
+                    "description": "Search code and return each match with the lines around it, in one call.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {"type": "string"},
+                            "file_pattern": {"type": "string"},
+                            "context_lines": {"type": "integer"},
+                        },
+                        "required": ["pattern"],
+                    },
+                },
+                {
+                    "name": "write_file",
+                    "description": "Create or overwrite a file with the given content.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "filepath": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["filepath", "content"],
+                    },
+                },
+                {
                     "name": "search_function_or_class_definition_in_code",
                     "description": "Locate class or function definitions by name.",
                     "inputSchema": {
@@ -232,6 +259,21 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 # which is the testbed only because the container runs us
                 # there; naming it holds wherever the server is started.
                 output = search_code(pattern, directory=testbed, **sc_kwargs)
+
+            elif name == "search_code_with_context":
+                pattern = str(args.get("pattern", ""))
+                cx_kwargs: dict[str, Any] = {}
+                if args.get("file_pattern") is not None:
+                    cx_kwargs["file_pattern"] = str(args["file_pattern"])
+                if args.get("context_lines") is not None:
+                    cx_kwargs["context_lines"] = int(args["context_lines"])
+                output = search_code_with_context(
+                    pattern, directory=testbed, **cx_kwargs
+                )
+
+            elif name == "write_file":
+                filepath = str(args.get("filepath", ""))
+                output = write_file(filepath, str(args.get("content", "")))
 
             elif name == "search_function_or_class_definition_in_code":
                 sym_name = str(args.get("name", ""))
