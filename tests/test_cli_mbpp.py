@@ -13,6 +13,7 @@ from agent_smith.cli.mbpp import prompt as prompt_module
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
+from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 A_TASK = MBPPTaskInput(
     task_id=11,
@@ -254,3 +255,121 @@ def test_the_model_pair_is_optional() -> None:
 def test_the_task_file_and_output_are_required() -> None:
     with pytest.raises(SystemExit):
         cli.parse_args(["--output", "s.json"])
+
+
+class TestTheSubmissionIsChecked:
+    """`build_validator` runs the task's own assertions against a submission."""
+
+    def a_sandbox(self, script: list[object]) -> object:
+        class Sandbox:
+            def __init__(self) -> None:
+                self.ran: list[str] = []
+                self.restarts = 0
+
+            def restart(self) -> None:
+                self.restarts += 1
+
+            def execute(self, code: str):  # type: ignore[no-untyped-def]
+                self.ran.append(code)
+                return script.pop(0)
+
+        return Sandbox()
+
+    def test_a_submission_that_passes_the_given_tests_is_accepted(self) -> None:
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
+
+        validate = cli.build_validator(A_TASK, sandbox)  # type: ignore[arg-type]
+
+        assert validate("def remove_Occ(s, ch): return s") is None
+
+    def test_the_submitted_source_runs_with_the_task_s_own_assertions(self) -> None:
+        # Not the code the model happened to run: the string it submitted, which
+        # is what the grader will run, and the assertions exactly as given.
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
+
+        cli.build_validator(A_TASK, sandbox)("def remove_Occ(s, ch): return s")  # type: ignore[arg-type]
+
+        defined, asserted = sandbox.ran  # type: ignore[attr-defined]
+        assert "def remove_Occ(s, ch): return s" in defined
+        assert "import math" in defined
+        assert asserted == 'assert remove_Occ("hello", "l") == "heo"'
+
+    def test_the_refusal_names_the_assertion_that_failed(self) -> None:
+        # `exec` of a string can only blame `<string>`, so the traceback alone
+        # is a bare AssertionError: which case broke has to be said here.
+        task = A_TASK.model_copy(
+            update={
+                "test_list": [
+                    'assert remove_Occ("hello", "l") == "heo"',
+                    'assert remove_Occ("abcda", "a") == "bcd"',
+                ]
+            }
+        )
+        sandbox = self.a_sandbox(
+            [
+                ExecResult(outcome=Outcome.OK, stdout=""),
+                ExecResult(outcome=Outcome.OK, stdout=""),
+                ExecResult(
+                    outcome=Outcome.ERROR,
+                    stderr="AssertionError",
+                    error="AssertionError",
+                ),
+            ]
+        )
+
+        refusal = cli.build_validator(task, sandbox)(  # type: ignore[arg-type]
+            "def remove_Occ(s, ch): return s"
+        )
+
+        assert refusal is not None
+        assert 'assert remove_Occ("abcda", "a") == "bcd"' in refusal
+        assert 'assert remove_Occ("hello", "l") == "heo"' not in refusal
+        assert "AssertionError" in refusal
+
+    def test_a_submission_that_will_not_even_define_is_refused(self) -> None:
+        sandbox = self.a_sandbox(
+            [ExecResult(outcome=Outcome.ERROR, error="SyntaxError: invalid syntax")]
+        )
+
+        refusal = cli.build_validator(A_TASK, sandbox)("def remove_Occ(")  # type: ignore[arg-type]
+
+        assert refusal is not None
+        assert "SyntaxError" in refusal
+
+    def test_a_submission_that_ends_the_run_on_its_own_is_refused(self) -> None:
+        # A submitted string carrying `final_answer(...)` raises out of the
+        # first block, so no assertion runs at all. Reading that as "not the
+        # submission's fault" would wave through the one thing the grader is
+        # guaranteed to fail on: `final_answer` does not exist there.
+        sandbox = self.a_sandbox(
+            [ExecResult(outcome=Outcome.FINAL_ANSWER, final_answer="whatever")]
+        )
+
+        assert (
+            cli.build_validator(A_TASK, sandbox)(  # type: ignore[arg-type]
+                "def remove_Occ(s, ch): return s\nfinal_answer('done')"
+            )
+            is not None
+        )
+
+    def test_the_submission_is_judged_on_its_own(self) -> None:
+        # The worker the loop drives still holds every helper the model defined
+        # along the way. A submission leaning on one of them passes here and
+        # raises NameError in front of the grader, so the namespace goes first.
+        sandbox = self.a_sandbox([ExecResult(outcome=Outcome.OK, stdout="")] * 2)
+
+        cli.build_validator(A_TASK, sandbox)("def remove_Occ(s, ch): return s")  # type: ignore[arg-type]
+
+        assert sandbox.restarts == 1  # type: ignore[attr-defined]
+
+    def test_a_task_with_no_visible_tests_accepts_whatever_it_is_given(self) -> None:
+        # Nothing to check against, so there is nothing to refuse on -- and
+        # running the source alone would reject a perfectly good answer for
+        # printing nothing.
+        bare = MBPPTaskInput(
+            task_id=1, task_definition="Add.", function_definition="def add(a, b):"
+        )
+        sandbox = self.a_sandbox([])
+
+        assert cli.build_validator(bare, sandbox)("def add(a, b): return a + b") is None  # type: ignore[arg-type]
+        assert sandbox.ran == []  # type: ignore[attr-defined]

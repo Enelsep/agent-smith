@@ -40,6 +40,13 @@ class ExtractionResult(BaseModel):
     repaired: bool = False
     repair_note: str | None = None
     failure: str | None = None
+    only_comments: bool = False
+    """The block parsed and held nothing but comments.
+
+    A failure of its own kind: the format was right and the reasoning is all
+    there, so telling this model to send a well-formed block would send it round
+    the same loop. What it needs to hear is that comments do not run.
+    """
 
     @model_validator(mode="after")
     def _exactly_one_outcome(self) -> "ExtractionResult":

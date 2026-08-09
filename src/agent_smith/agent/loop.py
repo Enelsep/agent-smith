@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 from agent_smith.agent import observation
@@ -22,13 +23,56 @@ from agent_smith.agent.history import compact_history
 from agent_smith.extraction import extract_code
 from agent_smith.llm import LLMResponse, Message, ProviderError
 from agent_smith.models.contract import SolutionOutput, StepMetrics
+from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agent_smith.agent.task import TaskSpec
     from agent_smith.llm import LLMProvider
+
+AnswerValidator = Callable[[str], str | None]
+"""Judges a submission before the run is allowed to end on it.
+
+Given what `final_answer` was called with, it returns `None` to accept or the
+reason to refuse - addressed to the model, since that reason becomes the
+observation it reads next. Judging the answer here rather than in the prompt is
+what makes it hold whatever the model believes about its own work."""
+
+UNCHANGED_ANSWER = (
+    "final_answer refused: this is the submission that was just refused, "
+    "unchanged, so it was not judged again — the answer cannot come out "
+    "differently. Act on the reason above before submitting the same thing."
+)
+
+
+def judged_once(validate: AnswerValidator) -> AnswerValidator:
+    """Wrap a validator so an unchanged resubmission is refused unjudged.
+
+    A refusal the model acts on is the mechanism working: it reads what failed,
+    changes the code, submits again. A resubmission of the *identical* answer is
+    not — judging it again spends the task's clock to reach the answer already
+    given, and the trace it leaves reads as guessing against an oracle rather
+    than as fixing a bug.
+
+    One repeat is refused rather than the run ended: the iteration, token and
+    wall-clock guards already stop a task that goes nowhere, and a fourth
+    ceiling here would be a number to defend rather than a rule.
+
+    Benchmark-agnostic, because the rule is about the answer and not about how
+    it is judged: MBPP hands this an assertion run, SWE-bench a container one.
+    """
+    refused: str | None = None
+
+    def once(submitted: str) -> str | None:
+        nonlocal refused
+        if submitted == refused:
+            return UNCHANGED_ANSWER
+        verdict = validate(submitted)
+        refused = None if verdict is None else submitted
+        return verdict
+
+    return once
+
 
 # The MBPP ceiling the moulinette enforces, and the stricter of the two it
 # knows: SWE-bench allows 30 and its CLI passes that. A caller who forgets
@@ -79,6 +123,7 @@ def run_task(
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     max_wall_clock_seconds: float = DEFAULT_MAX_WALL_CLOCK_SECONDS,
     max_tokens_per_call: int | None = None,
+    validate_answer: AnswerValidator | None = None,
 ) -> SolutionOutput:
     """Run one task to a `SolutionOutput`. Never raises.
 
@@ -94,6 +139,11 @@ def run_task(
     cumulative output budget drains but never raises it, so a model configured
     to answer in 400 tokens is not handed 1 500 on the first step. `None`
     leaves the provider's own default in force.
+
+    `validate_answer` is given the last say on a submission: a run ends on
+    `final_answer` only if it returns `None`. Left out, any non-empty answer is
+    taken as given, which is what every caller had before there was anything to
+    check against.
 
     The transcript sent to the provider is compacted by default, via
     `compact_history` at its default `verbatim_steps`: older steps keep the
@@ -113,6 +163,7 @@ def run_task(
             max_output_tokens,
             max_wall_clock_seconds,
             max_tokens_per_call,
+            validate_answer,
         )
         return run.to_solution()
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
@@ -172,6 +223,7 @@ class _Run:
         max_output_tokens: int,
         max_wall_clock_seconds: float,
         max_tokens_per_call: int | None,
+        validate_answer: AnswerValidator | None = None,
     ) -> None:
         """Turn the loop until an answer arrives, the budget runs out, or the
         iterations run out."""
@@ -262,21 +314,49 @@ class _Run:
                 before = sandbox.restarts
                 executed = sandbox.execute(extracted.code)
                 if executed.outcome is Outcome.FINAL_ANSWER and executed.final_answer:
+                    # Held before the judging, not after: validating runs code,
+                    # and code that takes the sandbox down with it must not take
+                    # the answer too.
                     self.solution = executed.final_answer
-                    self.success = True
-                    self._record(
-                        step,
-                        answer,
-                        extracted.code,
-                        observation.combined_output(executed),
+                    rejection = (
+                        None
+                        if validate_answer is None
+                        else validate_answer(executed.final_answer)
                     )
-                    return
-                said = observation.from_execution(
-                    executed,
-                    namespace_lost=sandbox.restarts != before,
-                    repair_note=extracted.repair_note,
-                )
+                    if rejection is None:
+                        self.success = True
+                        self._record(
+                            step,
+                            answer,
+                            extracted.code,
+                            observation.combined_output(executed),
+                        )
+                        return
+                    # A submission that does not survive its own tests is not
+                    # an answer, and the run has budget left to say so. The
+                    # reason takes the place of the observation, which is what
+                    # gives the next turn something to act on.
+                    # The answer stays where it was put, without the success it
+                    # did not earn: if the run ends before a submission passes,
+                    # a refused attempt is worth more than an empty string.
+                    said = rejection
+                    if sandbox.restarts != before:
+                        # Validating can cost the worker, and the model would
+                        # otherwise keep referring to a namespace it has lost.
+                        said = f"{said}\n\n{observation.NAMESPACE_LOST}"
+                else:
+                    said = observation.from_execution(
+                        executed,
+                        namespace_lost=sandbox.restarts != before,
+                        repair_note=extracted.repair_note,
+                    )
                 self._record(step, answer, extracted.code, said)
+            if answer.cut_short:
+                # Whatever the step ended as, the reply that produced it stopped
+                # at the cap rather than where the model meant. Added after the
+                # step is recorded: the sandbox did not say this, the endpoint
+                # did, and `sandbox_output` is the sandbox's own account.
+                said = f"{said}\n\n{feedback.reply_cut_short()}"
             if reason == "wall_clock":
                 # The one budget that cannot be reserved against. `can_afford_
                 # forced_call` and `can_attempt_submission` let a token stop be
