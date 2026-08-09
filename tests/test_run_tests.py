@@ -96,3 +96,50 @@ class TestRunTestsTool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_script_that_ends_on_a_restore_does_not_pass_on_its_exit_code() -> None:
+    # Measured on `sympy__sympy-14711`: the evaluation script's last command is
+    # `git checkout <commit> <test file>`, which succeeds whatever the tests
+    # did, so the script exits 0 with a failing suite. A model reading PASSED
+    # there has no reason left to look for the bug.
+    from agent_smith.tools.run_tests import _parse_test_output
+
+    output = (
+        ": '>>>>> Start Test Output'\n"
+        "TypeError: A Vector must be supplied\n"
+        "=========== tests finished: 3 passed, 1 exceptions, in 2.22 seconds ====\n"
+        ": '>>>>> End Test Output'\n"
+        "+ git checkout c6753448b sympy/physics/vector/tests/test_vector.py\n"
+        "Updated 1 path from 0bd77345d\n"
+    )
+
+    passed, failed, _ = _parse_test_output(output)
+
+    assert passed == 3
+    assert failed == 1
+
+
+def test_what_the_restore_step_prints_is_not_read_as_a_result() -> None:
+    # Everything after the end marker is the script putting the checkout back.
+    from agent_smith.tools.run_tests import test_region
+
+    output = (
+        ": '>>>>> Start Test Output'\n"
+        "2 passed\n"
+        ": '>>>>> End Test Output'\n"
+        "FAILED to remove stale file\n"
+    )
+
+    assert "FAILED" not in test_region(output)
+
+
+def test_a_test_that_raised_counts_even_under_a_word_we_do_not_know() -> None:
+    from agent_smith.tools.run_tests import _parse_test_output
+
+    output = "1 passed\nTraceback (most recent call last):\n  ValueError: no\n"
+
+    _, failed, names = _parse_test_output(output)
+
+    assert failed == 1
+    assert names
