@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from agent_smith.tools.run_tests import (
+    FAILED_STATUS,
     PASSED_STATUS,
     _parse_test_output,
     run_tests,
@@ -143,3 +144,12 @@ def test_a_test_that_raised_counts_even_under_a_word_we_do_not_know() -> None:
 
     assert failed == 1
     assert names
+
+
+def test_a_script_that_died_on_its_own_syntax_does_not_pass() -> None:
+    # Measured: a model retyped the evaluation script into `run_tests`, lost
+    # part of a heredoc, and bash exited 2 at EOF -- after an earlier fragment
+    # had printed a passing count. Both halves have to agree.
+    result = run_tests(eval_script="echo '4 passed'; exit 2", directory=".")
+
+    assert FAILED_STATUS in result

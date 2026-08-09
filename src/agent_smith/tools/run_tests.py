@@ -63,13 +63,18 @@ def run_tests(
 
     passed_count, failed_count, failing_names = _parse_test_output(raw_output)
 
-    # The script's exit code is its *last command's*, and a SWE-bench script
-    # ends by restoring the test files from git -- which succeeds whatever the
-    # tests did. A zero therefore says nothing, so the verdict is read from the
-    # test region alone, and it takes evidence that tests ran and none failed.
-    # An output this cannot parse reads as FAILED, which costs the model
-    # iterations; reading it as PASSED costs the task.
-    passed = failed_count == 0 and passed_count > 0
+    # The exit code is evidence in one direction only. A SWE-bench script ends
+    # by restoring the test files from git, which succeeds whatever the tests
+    # did, so a zero says nothing -- but a non-zero cannot come from that and
+    # means the script itself broke. Measured: a model retyped the script into
+    # `run_tests`, dropped part of a heredoc, and bash died at EOF with status
+    # 2 while an earlier fragment had already printed "4 passed".
+    #
+    # So all three must hold: the script ran to the end, tests were seen to
+    # run, and none of them failed. An output this cannot parse reads as
+    # FAILED, which costs the model iterations; reading it as PASSED costs the
+    # task.
+    passed = exit_code == 0 and failed_count == 0 and passed_count > 0
     lines = [
         f"{PASSED_STATUS if passed else FAILED_STATUS} (Exit code: {exit_code})",
         f"Summary: {passed_count} passed, {failed_count} failed",
