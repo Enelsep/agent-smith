@@ -38,6 +38,14 @@ A solve is about five turns. This is the order they go in:
 
 {tools}
 
+The repository is installed in a conda environment named `testbed`, and the
+container's bare `python` is not it. Run code through the task's own
+environment or its imports will be missing:
+
+```python
+print(run_command("conda run -n testbed python -c 'import pkg; ...'"))
+```
+
 final_answer(get_patch()) ends the task. Call it once the tests you were given
 pass; the patch it carries is the answer you are judged on.
 
