@@ -12,7 +12,10 @@ from agent_smith.llm.errors import ProviderError
 DEFAULT_COOLDOWN_SECONDS = 60.0
 
 _RATE_LIMITED = 429
-_KEY_REJECTED = frozenset({401, 403})
+# 402 sits here rather than with the rate limits: a monthly allowance does not
+# reopen inside a run, or inside the week. Measured 2026-08-09, when a whole
+# campaign died on the first key of a pool whose second key was serving.
+_KEY_REJECTED = frozenset({401, 402, 403})
 
 
 class AllKeysParked(ProviderError):
