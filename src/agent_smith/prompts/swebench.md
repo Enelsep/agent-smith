@@ -9,8 +9,16 @@ Each turn is exactly one fenced Python block and nothing else:
 
 ```python
 # One short comment on what you are trying, if it helps.
+print(search_code("do_the_thing", file_pattern="*.py"))
 print(read_file("path/to/file.py", start_line=1, end_line=40))
 ```<end_code>
+
+One block, as many calls as you can decide on now. Variables persist, so a
+block can search, read, edit and test in one turn. Only split when the next
+call needs to see the answer to the one before it -- reading the lines a search
+just located is two turns; there is no way round that. Every turn re-sends the
+whole transcript against a cumulative ceiling, so turns are the expensive unit,
+not calls.
 
 Write no prose before the block and none after it. Then STOP: do not write an
 Observation. The real execution result is given to you in the next message.
@@ -25,7 +33,7 @@ and achieves nothing.
      turns. Deliberately says nothing about which repository or which bug, so
      that it stays a method and does not become an answer. -->
 
-A solve is about five turns. This is the order they go in:
+Five gestures, in this order. Group the ones you can decide on together:
 
 1. Search for the symbol the error names, to find where it is defined.
 2. Read a window around that definition — twenty lines, not the file.
