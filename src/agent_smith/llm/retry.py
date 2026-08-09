@@ -23,9 +23,9 @@ DEFAULT_MAX_ELAPSED_SECONDS = 20.0
 _BACKOFF_BASE_SECONDS = 0.5
 _BACKOFF_CAP_SECONDS = 4.0
 
-# The two families the pool has just parked a key for. Another key is already
+# The families the pool has just parked a key for. Another key is already
 # waiting, so there is nothing to sleep for.
-_ROTATE_NOW = frozenset({401, 403, 429})
+_ROTATE_NOW = frozenset({401, 402, 403, 429})
 
 Jitter = Callable[[float, float], float]
 

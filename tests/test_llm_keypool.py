@@ -59,6 +59,10 @@ PENALTIES: list[tuple[str, ProviderError, float | None]] = [
     ("429 with zero", rate_limited("0"), DEFAULT_COOLDOWN_SECONDS),
     ("429 with a negative wait", rate_limited("-5"), DEFAULT_COOLDOWN_SECONDS),
     ("401", ProviderError("unauthorized", status_code=401), math.inf),
+    # A monthly allowance does not reopen inside a run, so the key is parked
+    # for good rather than cooled down. Measured 2026-08-09: six runs ended on
+    # a 402 while the second key of the pool was answering 200.
+    ("402", ProviderError("payment required", status_code=402), math.inf),
     ("403", ProviderError("forbidden", status_code=403), math.inf),
     ("500", ProviderError("boom", status_code=500), None),
     ("503", ProviderError("overloaded", status_code=503), None),
