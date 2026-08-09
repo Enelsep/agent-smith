@@ -8,6 +8,16 @@ from agent_smith.config import ConfigError
 from agent_smith.llm import KeySource
 from agent_smith.llm.errors import ProviderError
 from agent_smith.llm.keypool import DEFAULT_COOLDOWN_SECONDS, AllKeysParked, KeyPool
+from agent_smith.llm.retry import DEFAULT_MAX_ELAPSED_SECONDS
+
+
+def test_a_parked_key_reopens_within_the_budget_the_retry_loop_allows() -> None:
+    # The two constants were chosen apart and stopped agreeing: a 60 s cooldown
+    # against a 20 s retry budget meant `_sleep_if_it_fits` always refused, so
+    # every rate limit that parked the pool ended the run instead of costing it
+    # a wait. Measured 2026-08-09: runs carrying a moulinette-validated patch
+    # were discarded that way.
+    assert DEFAULT_COOLDOWN_SECONDS < DEFAULT_MAX_ELAPSED_SECONDS
 
 
 class FakeClock:
