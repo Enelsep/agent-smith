@@ -357,13 +357,14 @@ async def main() -> None:
         try:
             request = json.loads(raw)
         except json.JSONDecodeError:
-            parse_error = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32700, "message": "Parse error"},
-            }
-            sys.stdout.write(json.dumps(parse_error) + "\n")
-            sys.stdout.flush()
+            # JSON-RPC says answer a parse error with a null id, and the MCP
+            # client's schema says an id is an int or a string -- so that reply
+            # fails validation, takes the client's reader down with it, and the
+            # run hangs on a bridge that will never answer again. Measured: a
+            # campaign stopped dead for 25 minutes on one task. There is also
+            # nothing useful to say, the id being what a reply is matched by.
+            # Reported on stderr, which is not the protocol channel.
+            print("skipped an unparsable line", file=sys.stderr, flush=True)
             continue
 
         if isinstance(request, dict):

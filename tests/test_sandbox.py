@@ -39,6 +39,47 @@ def test_function_persists_across_calls() -> None:
         assert r.stdout.strip() == "82"
 
 
+def test_a_bare_expression_shows_its_value() -> None:
+    # A tool returns its result rather than printing it. Measured on a real
+    # SWE-bench run, forgetting the `print()` cost three of eight iterations:
+    # the tool ran, the model was shown nothing, and it spent a turn retrying
+    # the identical call wrapped in `print`.
+    with Sandbox(timeout=2.0) as sb:
+        r = sb.execute("def tool():\n    return 'file contents'\n\ntool()")
+
+        assert r.outcome is Outcome.OK
+        assert r.stdout.strip() == "file contents"
+
+
+def test_a_value_shown_is_not_repr_quoted() -> None:
+    # What comes back is file contents and test output, meant to be read. The
+    # default hook's `repr` would hand the model `'line\nline'` on one line.
+    with Sandbox(timeout=2.0) as sb:
+        r = sb.execute("'first\\nsecond'")
+
+        assert r.stdout.strip() == "first\nsecond"
+
+
+def test_statements_that_are_not_expressions_stay_silent() -> None:
+    # Only a bare expression echoes. An assignment printing its value would
+    # flood the observation and charge the run for it.
+    with Sandbox(timeout=2.0) as sb:
+        r = sb.execute("x = 41\ny = x + 1\nNone")
+
+        assert r.outcome is Outcome.OK
+        assert r.stdout.strip() == ""
+
+
+def test_a_syntax_error_is_reported_like_any_other_failure() -> None:
+    # The block is parsed before it runs now, so a broken one must still come
+    # back as an observation rather than taking the worker down.
+    with Sandbox(timeout=2.0) as sb:
+        r = sb.execute("def broken(:\n    pass\n")
+
+        assert r.outcome is Outcome.ERROR
+        assert "SyntaxError" in (r.error or "")
+
+
 def test_normal_exception_is_captured_not_raised() -> None:
     with Sandbox(timeout=2.0) as sb:
         r = sb.execute("1 / 0")

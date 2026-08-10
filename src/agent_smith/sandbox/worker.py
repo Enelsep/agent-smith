@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import signal
+import sys
 import time
 import traceback
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from agent_smith.mcp.sandbox_integration import get_sandbox_tool_stubs
@@ -110,6 +113,32 @@ def _build_namespace(
     return namespace
 
 
+@contextlib.contextmanager
+def _echoing_expressions() -> Iterator[None]:
+    """Show the value of a bare expression, the way a REPL does.
+
+    A tool returns its result instead of printing it, so `read_file("x")` on a
+    line of its own used to run, produce the file, and show the model nothing.
+    Telling it to wrap the call in `print()` works -- and costs an iteration
+    every time it forgets, which measurement put at three of one run's eight
+    turns.
+
+    `str` rather than the default hook's `repr`, because what comes back is
+    file contents and test output meant to be read, not re-parsed.
+    """
+
+    def show(value: object) -> None:
+        if value is not None:
+            print(value)
+
+    previous = sys.displayhook
+    sys.displayhook = show
+    try:
+        yield
+    finally:
+        sys.displayhook = previous
+
+
 def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecResult:
     """Run one code block in the shared namespace and describe what happened"""
     violation = scan_for_escapes(code)
@@ -127,9 +156,16 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
         with (
             contextlib.redirect_stdout(out_buf),
             contextlib.redirect_stderr(err_buf),
+            _echoing_expressions(),
             enforcement(),
         ):
-            exec(code, namespace)  # noqa: S102
+            # Parsed inside the try so a SyntaxError is reported like any other
+            # failure. `Interactive` is what turns a bare expression into an
+            # echo; every other statement compiles exactly as before.
+            compiled = compile(
+                ast.Interactive(body=ast.parse(code).body), "<agent>", "single"
+            )
+            exec(compiled, namespace)  # noqa: S102
 
     except FinalAnswerSignal as sig:
         outcome = Outcome.FINAL_ANSWER
