@@ -14,6 +14,7 @@ from typing import Any
 
 from agent_smith.mcp.protocol import MCPToolDefinition
 from agent_smith.mcp.registry import MCPToolRegistry
+from agent_smith.mcp.wrapper import build_inspect_signature
 
 logger = logging.getLogger(__name__)
 

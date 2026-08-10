@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent_smith.cli import common
 from agent_smith.cli.swebench import main as cli
 from agent_smith.cli.swebench.prompt import build_system_prompt, task_prompt
 from agent_smith.mcp.protocol import MCPToolDefinition
@@ -101,6 +102,19 @@ class TestTheRun:
         # `test_the_setup_time_is_taken_out_of_the_wall_clock`. The ceiling
         # itself is asserted here, with the other three.
         assert cli.MAX_WALL_CLOCK_SECONDS == 900.0
+
+    def test_the_retry_budget_can_wait_out_an_announced_rate_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A free-tier 429 parks the only key for 60 seconds. On the retry
+        # budget MBPP sizes -- 20 seconds -- the pool can never come back and
+        # the whole task dies on the first one, 15 seconds into a 900-second
+        # clock. The provider has to be told which clock it is running on.
+        budget_reaching_the_loop(tmp_path, monkeypatch)
+
+        assert PROVIDER_KWARGS["wall_clock_seconds"] == cli.MAX_WALL_CLOCK_SECONDS
+        budget = cli.MAX_WALL_CLOCK_SECONDS / common.RETRY_SHARE_OF_WALL_CLOCK
+        assert budget > 60.0
 
     def test_the_tools_are_reached_inside_the_container(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -234,6 +248,9 @@ CLIENTS: list[tuple[str, list[str]]] = []
 COPIES: list[tuple[Path, str]] = []
 """Every copy the CLI made into the container, as (source, destination)."""
 
+PROVIDER_KWARGS: dict[str, object] = {}
+"""What the last `build_provider` call was tuned with, beyond the config."""
+
 CLEANED: list[str] = []
 """Every container the CLI tore down, by id."""
 
@@ -282,7 +299,13 @@ def _stub_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "UnifiedMCPClient", record)
     monkeypatch.setattr(cli, "MCPBridge", _Bridge)
-    monkeypatch.setattr(cli, "build_provider", lambda config: object())
+
+    def provider(config, **kwargs):  # type: ignore[no-untyped-def]
+        PROVIDER_KWARGS.clear()
+        PROVIDER_KWARGS.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(cli, "build_provider", provider)
     monkeypatch.setattr(
         cli.Sandbox,
         "from_config",
