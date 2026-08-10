@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -112,7 +113,12 @@ def build_client(args: argparse.Namespace) -> MCPClientProtocol | None:
         if not parts:
             raise ConfigError("--mcp-stdio needs a command to run")
         command, *arguments = parts
-        return UnifiedMCPClient(command=command, args=arguments)
+        # The transport otherwise inherits six variables (HOME, PATH and four
+        # more) and drops the rest, which loses the one the SWE-bench server
+        # reads: `TESTBED_PATH=... sandbox --mcp-stdio '...'` is how a server
+        # is told where the repository is. This command line is the user's
+        # own, and so is the process it names.
+        return UnifiedMCPClient(command=command, args=arguments, env=dict(os.environ))
 
     return UnifiedMCPClient(url=args.mcp_server)
 

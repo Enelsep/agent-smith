@@ -8,7 +8,13 @@ dependencies = [
     "pydantic",
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
-    "mcp>=2.0.0",
+    # Held below 2.0: the SDK renamed `mcp.server.fastmcp` to
+    # `mcp.server.mcpserver` there, and a server we are handed to connect to
+    # may well import the old path. We run those servers in this environment,
+    # so the version they need is the version we install. Nothing of ours
+    # imports the package outside `mcp/client.py`, whose names are the same
+    # either way.
+    "mcp>=1.29,<2",
     "typing-extensions>=4.16.0",
 ]
 

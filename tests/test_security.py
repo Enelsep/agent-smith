@@ -126,3 +126,14 @@ def test_namespace_intact_after_blocked_and_escape_attempts(sb: Sandbox) -> None
     assert r.outcome is Outcome.OK
     assert "still working: True" in r.stdout
     assert sb.restarts == 0
+
+
+def test_dir_lists_names_without_reaching_the_blocked_attributes(sb: Sandbox) -> None:
+    # `dir()` is how code asks what is in scope, and the correction's tool
+    # availability check is written on it. It reads names; the attributes that
+    # matter for an escape stay blocked whether or not they are listed.
+    listed = sb.execute("tool = 1\nprint('tool' in dir())")
+    assert listed.outcome is Outcome.OK
+    assert listed.stdout.strip() == "True"
+
+    assert sb.execute("().__class__.__subclasses__()").outcome is Outcome.BLOCKED

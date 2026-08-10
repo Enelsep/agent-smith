@@ -61,3 +61,30 @@ class TestSearchCodeTool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_overlapping_windows_are_merged_rather_than_repeated(tmp_path: Path) -> None:
+    # Two matches three lines apart would otherwise print the lines between
+    # them twice, which is the budget this tool is meant to save.
+    from agent_smith.tools.search_context import search_code_with_context
+
+    (tmp_path / "m.py").write_text(
+        "\n".join(f"line{n}" if n not in (5, 8) else f"hit{n}" for n in range(1, 13)),
+        encoding="utf-8",
+    )
+
+    found = search_code_with_context("hit", "*.py", 3, str(tmp_path))
+
+    assert found.count("line6") == 1
+    assert "5> hit5" in found
+    assert "8> hit8" in found
+
+
+def test_a_search_with_no_match_says_so_rather_than_reading_files(
+    tmp_path: Path,
+) -> None:
+    from agent_smith.tools.search_context import search_code_with_context
+
+    (tmp_path / "m.py").write_text("nothing here\n", encoding="utf-8")
+
+    assert "No matches" in search_code_with_context("absent", "*.py", 2, str(tmp_path))

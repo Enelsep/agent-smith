@@ -21,6 +21,11 @@ and achieves nothing.
 
 {tools}
 
+Reach for `search_code_with_context` before `search_code`: it returns the
+matching line and the lines around it in one call, where the pair of them costs
+two turns. Every turn re-sends the whole transcript against a cumulative
+ceiling, so a turn saved is budget saved.
+
 final_answer(get_patch()) ends the task. Call it once the tests you were given
 pass; the patch it carries is the answer you are judged on.
 

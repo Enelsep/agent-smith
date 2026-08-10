@@ -14,14 +14,37 @@ from agent_smith.tools.read_file import read_file
 from agent_smith.tools.run_command import run_command
 from agent_smith.tools.run_tests import run_tests
 from agent_smith.tools.search_code import search_code
+from agent_smith.tools.search_context import search_code_with_context
 from agent_smith.tools.search_definition import (
     search_function_or_class_definition_in_code,
 )
+from agent_smith.tools.write_file import write_file
 
 
 def get_testbed_path() -> str:
     """Returns the configured TESTBED_PATH or current working directory."""
     return os.environ.get("TESTBED_PATH", os.getcwd())
+
+
+# The repository root is `/testbed` inside the container, and the model writes
+# that prefix because the task statement and every listing show it. When the
+# server runs outside a container, TESTBED_PATH points somewhere else and the
+# same absolute paths have to land there instead.
+TESTBED_ROOT = "/testbed"
+
+# Every argument that carries a path. Rewriting them in one place at dispatch
+# keeps each tool branch free of the concern, and covers tools added later.
+PATH_ARGUMENTS = frozenset({"filepath", "directory", "workdir"})
+
+
+def in_testbed(path: str) -> str:
+    """Resolves a path written against the repository root."""
+    testbed = get_testbed_path()
+    if path == TESTBED_ROOT:
+        return testbed
+    if path.startswith(TESTBED_ROOT + "/"):
+        return os.path.join(testbed, path[len(TESTBED_ROOT) + 1 :])
+    return path
 
 
 # ------------------------------------------------------------------------------
@@ -109,6 +132,31 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                     },
                 },
                 {
+                    "name": "search_code_with_context",
+                    "description": "Search code and return each match with the lines around it, in one call.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {"type": "string"},
+                            "file_pattern": {"type": "string"},
+                            "context_lines": {"type": "integer"},
+                        },
+                        "required": ["pattern"],
+                    },
+                },
+                {
+                    "name": "write_file",
+                    "description": "Create or overwrite a file with the given content.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "filepath": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["filepath", "content"],
+                    },
+                },
+                {
                     "name": "search_function_or_class_definition_in_code",
                     "description": "Locate class or function definitions by name.",
                     "inputSchema": {
@@ -171,6 +219,12 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     elif method == "tools/call":
         name = params.get("name")
         args = params.get("arguments", {}) or {}
+        args = {
+            key: in_testbed(value)
+            if key in PATH_ARGUMENTS and isinstance(value, str)
+            else value
+            for key, value in args.items()
+        }
 
         try:
             if name == "read_file":
@@ -200,11 +254,32 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 sc_kwargs: dict[str, Any] = {}
                 if "file_pattern" in args and args["file_pattern"] is not None:
                     sc_kwargs["file_pattern"] = str(args["file_pattern"])
-                output = search_code(pattern, **sc_kwargs)
+                # The three search tools take no directory from the model --
+                # there is only one repository to search. They default to `.`,
+                # which is the testbed only because the container runs us
+                # there; naming it holds wherever the server is started.
+                output = search_code(pattern, directory=testbed, **sc_kwargs)
+
+            elif name == "search_code_with_context":
+                pattern = str(args.get("pattern", ""))
+                cx_kwargs: dict[str, Any] = {}
+                if args.get("file_pattern") is not None:
+                    cx_kwargs["file_pattern"] = str(args["file_pattern"])
+                if args.get("context_lines") is not None:
+                    cx_kwargs["context_lines"] = int(args["context_lines"])
+                output = search_code_with_context(
+                    pattern, directory=testbed, **cx_kwargs
+                )
+
+            elif name == "write_file":
+                filepath = str(args.get("filepath", ""))
+                output = write_file(filepath, str(args.get("content", "")))
 
             elif name == "search_function_or_class_definition_in_code":
                 sym_name = str(args.get("name", ""))
-                output = search_function_or_class_definition_in_code(sym_name)
+                output = search_function_or_class_definition_in_code(
+                    sym_name, directory=testbed
+                )
 
             elif name == "find_references":
                 sym_name = str(args.get("name", ""))
@@ -213,7 +288,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                     fr_kwargs["filepath"] = str(args["filepath"])
                 if "line" in args and args["line"] is not None:
                     fr_kwargs["line"] = int(args["line"])
-                output = find_references(sym_name, **fr_kwargs)
+                output = find_references(sym_name, directory=testbed, **fr_kwargs)
 
             elif name == "run_tests":
                 directory = str(args.get("directory", testbed))

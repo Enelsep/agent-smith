@@ -42,14 +42,14 @@ class TestSearchDefinitionTool(unittest.TestCase):
             name="MyTargetClass",
             directory=str(self.root),
         )
-        self.assertIn("module.py:7 class MyTargetClass", result)
+        self.assertIn("module.py:7 class MyTargetClass:", result)
 
     def test_search_definition_async_func(self) -> None:
         result = search_function_or_class_definition_in_code(
             name="async_target_func",
             directory=str(self.root),
         )
-        self.assertIn("module.py:11 async_function async_target_func", result)
+        self.assertIn("module.py:11 async def async_target_func():", result)
 
     def test_search_definition_immune_to_comments(self) -> None:
         result = search_function_or_class_definition_in_code(
@@ -60,7 +60,7 @@ class TestSearchDefinitionTool(unittest.TestCase):
 
         # Should match line 4 (def my_target_func), but NOT line 1 (comment) or line 14 (call)
         self.assertEqual(len(lines), 1)
-        self.assertIn("module.py:4 function my_target_func", lines[0])
+        self.assertIn("module.py:4 def my_target_func(x, y):", lines[0])
 
     def test_search_definition_not_found(self) -> None:
         result = search_function_or_class_definition_in_code(
