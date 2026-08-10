@@ -28,7 +28,11 @@ from agent_smith.models.contract import SandboxConfig
 # the catalogue when the environment holds keys for several providers, and the
 # one a keyless environment falls back to, so the resulting error names its
 # variables instead of whichever provider happens to be last in models.json.
-DEV_DEFAULT_PROVIDER = "groq"
+#
+# Mistral because it is the one model measured over all 257 MBPP tasks, and the
+# only one that can be measured again: its free tier limits requests per second
+# where Groq's limits tokens per day, and a full batch does not fit in a day.
+DEV_DEFAULT_PROVIDER = "mistral"
 
 DEFAULT_MODELS_PATH = Path("models.json")
 DEFAULT_SANDBOX_PATH = Path("sandbox_template.json")
