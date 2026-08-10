@@ -222,6 +222,7 @@ def test_start_triggers_bootstrap_dependencies() -> None:
             MagicMock(returncode=0),  # preventive removal
             MagicMock(returncode=0),  # docker pull
             MagicMock(stdout="cid123\n", returncode=0),  # docker run
+            MagicMock(stdout="", returncode=0),  # cut_network: docker inspect
         ]
 
         mgr.start()
@@ -277,3 +278,61 @@ def test_locate_testbed_only_falls_back_to_a_directory_that_is_there() -> None:
         ]
 
         assert mgr.locate_testbed() == "/usr/src/app"
+
+
+def test_the_container_is_detached_from_every_network_it_is_on() -> None:
+    # The sandbox denies the worker a socket; `run_command` runs a shell in the
+    # container, where that guard does not reach. Measured on a real image, a
+    # plain `docker run` leaves a container that reaches pypi.org.
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "abc123"
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(stdout="bridge extra \n", returncode=0),
+            MagicMock(returncode=0, stderr=""),
+            MagicMock(returncode=0, stderr=""),
+        ]
+
+        mgr.cut_network()
+
+    disconnects = [
+        call.args[0] for call in mock_run.call_args_list if "network" in call.args[0]
+    ]
+    assert disconnects == [
+        ["docker", "network", "disconnect", "bridge", "abc123"],
+        ["docker", "network", "disconnect", "extra", "abc123"],
+    ]
+
+
+def test_a_network_that_will_not_detach_does_not_kill_the_task() -> None:
+    mgr = DockerManager("test-image:latest", "test-container")
+    mgr.container_id = "abc123"
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(stdout="bridge \n", returncode=0),
+            MagicMock(returncode=1, stderr="no such network"),
+        ]
+
+        mgr.cut_network()
+
+
+def test_the_route_out_is_cut_after_the_bootstrap_that_needs_it() -> None:
+    # Order matters: installing ruff, jedi and ripgrep is the one startup step
+    # that needs a network, and it runs before the agent has any say.
+    mgr = DockerManager("test-image:latest", "test-container")
+    order: list[str] = []
+
+    with (
+        patch("subprocess.run") as mock_run,
+        patch.object(mgr, "sweep_orphans"),
+        patch.object(
+            mgr, "bootstrap_dependencies", side_effect=lambda: order.append("bootstrap")
+        ),
+        patch.object(mgr, "cut_network", side_effect=lambda: order.append("cut")),
+    ):
+        mock_run.return_value = MagicMock(stdout="abc123", returncode=0)
+        mgr.start()
+
+    assert order == ["bootstrap", "cut"]
