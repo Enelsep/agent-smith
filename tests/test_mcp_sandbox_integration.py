@@ -38,57 +38,47 @@ class TestMCPSandboxIntegration(unittest.IsolatedAsyncioTestCase):
             "test_tool", {"target_file": "app.py", "limit": 10}
         )
 
-    def test_stub_names_positional_arguments_from_the_schema(self) -> None:
-        # A model writes `read_file("app.py", end_line=40)`; the schema says
-        # which parameter the bare string is, and the wire format is keyword.
-        tool_def = MCPToolDefinition(
-            name="read_file",
-            description="Read a file.",
+    def test_a_positional_call_lands_on_the_schema_order(self) -> None:
+        # `search_code("coth", file_pattern="hyperbolic.py")` is what a model
+        # writes. Refusing it raised a TypeError naming an internal function,
+        # which tells the model nothing it can act on: 117 steps out of 240 in
+        # one campaign, and one model spent all thirty iterations there without
+        # ever reaching `run_tests`.
+        searcher = MCPToolDefinition(
+            name="search_code",
+            description="Search",
             input_schema={
                 "type": "object",
-                "properties": {
-                    "filepath": {"type": "string"},
-                    "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"},
-                },
-                "required": ["filepath"],
+                "properties": {"pattern": {}, "file_pattern": {}, "directory": {}},
             },
         )
-        mock_ipc = MagicMock(return_value="contents")
-        stub = create_tool_stub(tool_def, mock_ipc)
+        mock_ipc = MagicMock(return_value="found")
+        stub = create_tool_stub(searcher, mock_ipc)
 
-        self.assertEqual(stub("app.py", end_line=40), "contents")
+        assert stub("coth", file_pattern="hyperbolic.py") == "found"
         mock_ipc.assert_called_once_with(
-            "read_file", {"filepath": "app.py", "end_line": 40}
+            "search_code", {"pattern": "coth", "file_pattern": "hyperbolic.py"}
         )
 
-    def test_a_call_that_does_not_fit_the_schema_says_so_in_one_line(self) -> None:
-        # A traceback out of `inspect` is not something a model can act on: it
-        # reads eight frames of internals, and this machine's paths with them.
-        # Measured on a real run, a model that got one repeated the identical
-        # malformed call six turns running.
-        tool_def = MCPToolDefinition(
-            name="edit_file",
-            description="Replace text in a file.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "filepath": {"type": "string"},
-                    "old_str": {"type": "string"},
-                    "new_str": {"type": "string"},
-                },
-                "required": ["filepath", "old_str", "new_str"],
-            },
+    def test_the_same_argument_twice_is_named_rather_than_raised(self) -> None:
+        searcher = MCPToolDefinition(
+            name="search_code",
+            description="Search",
+            input_schema={"type": "object", "properties": {"pattern": {}}},
         )
-        mock_ipc = MagicMock()
-        stub = create_tool_stub(tool_def, mock_ipc)
+        stub = create_tool_stub(searcher, MagicMock())
 
-        answer = stub("app.py", "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
+        answer = stub("coth", pattern="cotm")
 
-        assert answer.startswith("Error: Invalid arguments for 'edit_file'")
-        assert "new_str" in answer
-        assert "Traceback" not in answer
-        mock_ipc.assert_not_called()
+        assert "pattern" in answer
+        assert "twice" in answer
+
+    def test_more_arguments_than_the_schema_has_says_so(self) -> None:
+        stub = create_tool_stub(self.tool_def, MagicMock())
+
+        answer = stub("one", "two")
+
+        assert "at most 0 arguments" in answer
 
     def test_get_sandbox_tool_stubs(self) -> None:
         mock_ipc = MagicMock()

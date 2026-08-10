@@ -34,11 +34,18 @@ def from_extraction(result: ExtractionResult) -> str:
     account of what went wrong and adds the sandbox's own voice and the way
     out.
     """
-    # A strategy that matched and then failed means the model framed the block
-    # correctly and got the contents wrong; it does not need the format list.
-    return feedback.no_code_block(
-        result.failure, saw_format=result.strategy is not None
-    )
+    # A block that holds only comments was framed correctly and reasoned in the
+    # wrong place: neither the format list nor "send a well-formed block" says
+    # anything it can act on.
+    if result.only_comments:
+        said = feedback.only_comments(result.failure)
+    else:
+        # A strategy that matched and then failed means the model framed the
+        # block correctly and got the contents wrong; no format list needed.
+        said = feedback.no_code_block(
+            result.failure, saw_format=result.strategy is not None
+        )
+    return said
 
 
 def from_execution(

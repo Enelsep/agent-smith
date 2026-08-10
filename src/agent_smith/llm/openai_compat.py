@@ -32,6 +32,7 @@ class _Message(BaseModel):
 
 class _Choice(BaseModel):
     message: _Message
+    finish_reason: str | None = None
 
 
 class _Usage(BaseModel):
@@ -263,6 +264,7 @@ class OpenAICompatProvider:
             latency_ms=latency_ms,
             model=parsed.model or self.model,
             api_url=self.completions_url,
+            cut_short=parsed.choices[0].finish_reason == "length",
         )
 
 

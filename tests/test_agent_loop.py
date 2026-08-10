@@ -1122,3 +1122,167 @@ def test_a_forced_turn_that_answers_nothing_is_tried_again_while_budget_allows()
     assert nudged == [2, 3], f"expected two forced attempts, got {nudged}"
     assert result.success is True
     assert result.solution == "done"
+
+
+def test_a_submission_the_validator_rejects_does_not_end_the_run() -> None:
+    # The prompt asks the model to run the assertions before submitting;
+    # nothing makes it. Task 84 read `1 1` where the test wanted `1 2`, called
+    # that a match and submitted. A harness that checks the answer itself holds
+    # whatever the model believes.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+    rejected: list[str] = []
+
+    def validate(submitted: str) -> str | None:
+        rejected.append(submitted)
+        return None if submitted == "right" else "it failed the given tests"
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), validate_answer=validate
+    )
+
+    assert rejected == ["wrong", "right"]
+    assert solution.success is True
+    assert solution.solution == "right"
+    assert solution.iterations == 2
+
+
+def test_the_rejection_is_what_the_model_reads_next() -> None:
+    # A rejection the model never sees is a wasted iteration: it would submit
+    # the same answer again.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+
+    run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        validate_answer=lambda s: None if s == "right" else "assert add(1, 2) failed",
+    )
+
+    second_call = provider.calls[1]
+    assert "assert add(1, 2) failed" in second_call[-1]["content"]
+
+
+def test_without_a_validator_a_submission_is_taken_as_given() -> None:
+    # The default has to stay what every existing caller relies on.
+    provider = FakeProvider([a_response("```python\nfinal_answer('whatever')\n```")])
+    sandbox = FakeSandbox([answered("whatever")])
+
+    solution = run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert solution.success is True
+    assert solution.solution == "whatever"
+
+
+def test_a_rejected_submission_is_recorded_as_the_step_that_it_was() -> None:
+    # The metrics must show the submission that was refused, not a gap.
+    provider = FakeProvider(
+        [
+            a_response("```python\nfinal_answer('wrong')\n```"),
+            a_response("```python\nfinal_answer('right')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("wrong"), answered("right")])
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        validate_answer=lambda s: None if s == "right" else "no",
+    )
+
+    assert solution.steps[0].sandbox_input == "final_answer('wrong')"
+    assert solution.steps[0].sandbox_output == "no"
+
+
+def test_a_run_that_never_satisfies_the_validator_still_answers() -> None:
+    # The grader scores the string, not the flag. An attempt the validator
+    # refused can still pass the tests it is actually judged on -- our sandbox
+    # is not the container it will run in -- and an empty solution never can.
+    provider = FakeProvider(
+        [a_response("```python\nfinal_answer('best effort')\n```")] * 2
+    )
+    sandbox = FakeSandbox([answered("best effort")] * 2)
+
+    solution = run_task(
+        a_task(),
+        provider,
+        sandbox,
+        clock=FakeClock(),
+        max_iterations=2,
+        validate_answer=lambda _: "it failed the given tests",
+    )
+
+    assert solution.success is False
+    assert solution.solution == "best effort"
+    assert solution.error is not None
+
+
+def test_a_reply_cut_off_mid_comment_is_told_both_things() -> None:
+    # The observed failure: the model plans in comments, the token cap stops it
+    # before it writes any code, and the harness answers "no code block" -- true
+    # but useless. What it can act on is that it was cut off, and that comments
+    # are not what runs.
+    provider = FakeProvider(
+        [
+            a_response("```python\n# first I need to handle the empty", cut_short=True),
+            a_response("```python\nfinal_answer('done')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    said = provider.calls[1][-1]["content"]
+    assert "cut off at its token limit" in said
+    assert "Comments do not run" in said
+
+
+def test_a_validator_that_blows_up_does_not_take_the_answer_with_it() -> None:
+    # Validating runs code, and running code can lose the worker. The answer is
+    # held before the judging, so a sandbox that dies mid-check costs the run
+    # its success, not its solution.
+    provider = FakeProvider([a_response("```python\nfinal_answer('the answer')\n```")])
+    sandbox = FakeSandbox([answered("the answer")])
+
+    def explode(_: str) -> str | None:
+        raise RuntimeError("sandbox has no live connection to its worker")
+
+    solution = run_task(
+        a_task(), provider, sandbox, clock=FakeClock(), validate_answer=explode
+    )
+
+    assert solution.success is False
+    assert solution.solution == "the answer"
+
+
+def test_a_truncated_reply_is_named_even_when_its_code_ran() -> None:
+    # The common truncation stops after a complete def and before the calls that
+    # would print anything. The block runs, the sandbox says "printed nothing",
+    # and without this the model re-sends the same over-long reply.
+    provider = FakeProvider(
+        [
+            a_response(
+                "```python\ndef add(a, b):\n    return a + b\n```", cut_short=True
+            ),
+            a_response("```python\nfinal_answer('done')\n```"),
+        ]
+    )
+    sandbox = FakeSandbox([ok(), answered("done")])
+
+    run_task(a_task(), provider, sandbox, clock=FakeClock())
+
+    assert "cut off at its token limit" in provider.calls[1][-1]["content"]

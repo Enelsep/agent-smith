@@ -7,12 +7,20 @@ from collections.abc import Callable, Sequence
 from agent_smith.config import ConfigError
 from agent_smith.llm.errors import ProviderError
 
-# What a 429 that names no wait costs the key. Long enough that we stop asking,
-# short enough that a minute-scale window can still reopen inside a run.
-DEFAULT_COOLDOWN_SECONDS = 60.0
+# What a 429 that names no wait costs the key. The limit we actually hit is a
+# per-second one -- measured 2026-08-09, 27 requests in 24.7 s against a free
+# tier allowing roughly one -- and a per-second window reopens in a second. It
+# also has to fit inside `retry.DEFAULT_MAX_ELAPSED_SECONDS`, which is a sixth
+# of an MBPP task's 120 s: a cooldown longer than that budget is never waited
+# out, it just ends the run. At 60 s it never fit, and runs holding a validated
+# patch were thrown away on a limit that had already reopened.
+DEFAULT_COOLDOWN_SECONDS = 5.0
 
 _RATE_LIMITED = 429
-_KEY_REJECTED = frozenset({401, 403})
+# 402 sits here rather than with the rate limits: a monthly allowance does not
+# reopen inside a run, or inside the week. Measured 2026-08-09, when a whole
+# campaign died on the first key of a pool whose second key was serving.
+_KEY_REJECTED = frozenset({401, 402, 403})
 
 
 class AllKeysParked(ProviderError):
