@@ -13,6 +13,10 @@
     "mistral": {
       "base_url": "https://api.mistral.ai/v1",
       "default_model": "magistral-small-latest",
+      "benchmark_defaults": {
+        "mbpp": "mistral-medium-latest",
+        "swebench": "magistral-small-latest"
+      },
       "models": {
         "mistral-medium-latest": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],

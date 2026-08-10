@@ -287,3 +287,64 @@ class TestKeysAreNeverPrinted:
         config = resolve(config_files, {"GROQ_API_KEY": "key-1"})
 
         assert config.api_keys == ["key-1"]
+
+
+CATALOGUE_WITH_A_BENCHMARK_DEFAULT = {
+    "providers": {
+        "mistral": {
+            "base_url": "https://api.mistral.ai/v1",
+            "default_model": "mistral-medium-latest",
+            "benchmark_defaults": {"swebench": "magistral-small-latest"},
+            "models": {},
+        }
+    }
+}
+
+
+@pytest.fixture
+def split_defaults(tmp_path: Path) -> tuple[Path, Path]:
+    models = tmp_path / "models.json"
+    models.write_text(json.dumps(CATALOGUE_WITH_A_BENCHMARK_DEFAULT), encoding="utf-8")
+    sandbox = tmp_path / "sandbox_template.json"
+    sandbox.write_text(json.dumps(SANDBOX), encoding="utf-8")
+    return models, sandbox
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "expected"),
+    [
+        ("swebench", "magistral-small-latest"),
+        ("mbpp", "mistral-medium-latest"),
+        (None, "mistral-medium-latest"),
+    ],
+)
+def test_a_benchmark_with_its_own_default_gets_it(
+    split_defaults: tuple[Path, Path], benchmark: str | None, expected: str
+) -> None:
+    # Measured: one model wins MBPP by nine points, the other wins SWE-bench
+    # 3/3 to 2/3 for a quarter of the tokens. Neither margin is small enough
+    # to settle with a single name. A benchmark the catalogue says nothing
+    # about, or none at all, still gets `default_model`.
+    config = resolve(
+        split_defaults,
+        {"MISTRAL_API_KEY": "k"},
+        provider_url="https://api.mistral.ai/v1",
+        benchmark=benchmark,
+    )
+
+    assert config.model_name == expected
+
+
+def test_a_named_model_outranks_the_benchmark_default(
+    split_defaults: tuple[Path, Path],
+) -> None:
+    # An operator who names a model means it, whichever benchmark is running.
+    config = resolve(
+        split_defaults,
+        {"MISTRAL_API_KEY": "k"},
+        provider_url="https://api.mistral.ai/v1",
+        model_name="codestral-2508",
+        benchmark="swebench",
+    )
+
+    assert config.model_name == "codestral-2508"

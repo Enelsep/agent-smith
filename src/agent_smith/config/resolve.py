@@ -73,6 +73,7 @@ def resolve_config(
     *,
     provider_url: str | None = None,
     model_name: str | None = None,
+    benchmark: str | None = None,
     models_path: Path = DEFAULT_MODELS_PATH,
     sandbox_path: Path = DEFAULT_SANDBOX_PATH,
     env: Mapping[str, str] | None = None,
@@ -84,6 +85,10 @@ def resolve_config(
     environment is used, after `.env` has been loaded into it. `load_dotenv`
     does not override variables that are already set, so a real environment
     variable always wins over the file.
+
+    `benchmark` names the caller, so a provider that catalogues a model per
+    benchmark can answer with the right one. Omitted, or absent from the
+    catalogue, falls back to the provider's single `default_model`.
     """
     if env is None:
         load_dotenv(env_file)
@@ -105,7 +110,12 @@ def resolve_config(
                 f"no --model-name given and provider {provider_name!r} is absent from "
                 f"{models_path}, so there is no default model to fall back on"
             )
-        model_name = provider.default_model
+        # The benchmark asking gets its own default when the catalogue names
+        # one. `--model-name` still outranks both: an operator who names a
+        # model means it, whichever benchmark is running.
+        model_name = provider.benchmark_defaults.get(
+            benchmark or "", provider.default_model
+        )
 
     # An endpoint or a model we have never catalogued is not an error: the
     # point of SETUP-3 is that a new OpenAI-compatible provider works by
