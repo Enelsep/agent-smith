@@ -50,37 +50,42 @@ def _walk(text: str, step: int) -> ExtractionResult:
 
 
 def _finish(strategy: Strategy, candidate: Candidate) -> ExtractionResult:
-    if _parses(candidate.code):
+    code, note = candidate.code, candidate.repair_note
+    module = _parse(code)
+    if module is None:
+        if note is not None:
+            # The one repair was already spent while matching.
+            return ExtractionResult(
+                strategy=strategy,
+                failure=(
+                    f"Your {strategy.value} block still does not parse after I {note}."
+                ),
+            )
+        repaired = repair_python(code)
+        if repaired is None:
+            return ExtractionResult(
+                strategy=strategy,
+                failure=f"Your {strategy.value} block is not valid Python.",
+            )
+        code, note = repaired
+        module = _parse(code)
+    if module is not None and not module.body:
+        # A block of nothing but comments parses, runs, and prints nothing, so
+        # the sandbox has no complaint to make about it. Naming it here is the
+        # only place the difference between "it printed nothing" and "there was
+        # nothing to print" is still visible.
         return ExtractionResult(
-            code=candidate.code,
             strategy=strategy,
-            repaired=candidate.repair_note is not None,
-            repair_note=candidate.repair_note,
+            failure=f"Your {strategy.value} block holds only comments.",
+            only_comments=True,
         )
-    if candidate.repair_note is not None:
-        # The one repair was already spent while matching.
-        return ExtractionResult(
-            strategy=strategy,
-            failure=(
-                f"Your {strategy.value} block still does not parse after I "
-                f"{candidate.repair_note}."
-            ),
-        )
-    repaired = repair_python(candidate.code)
-    if repaired is None:
-        return ExtractionResult(
-            strategy=strategy,
-            failure=f"Your {strategy.value} block is not valid Python.",
-        )
-    code, note = repaired
     return ExtractionResult(
-        code=code, strategy=strategy, repaired=True, repair_note=note
+        code=code, strategy=strategy, repaired=note is not None, repair_note=note
     )
 
 
-def _parses(code: str) -> bool:
+def _parse(code: str) -> ast.Module | None:
     try:
-        ast.parse(code)
+        return ast.parse(code)
     except (SyntaxError, ValueError):
-        return False
-    return True
+        return None

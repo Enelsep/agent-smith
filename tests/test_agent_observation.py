@@ -3,7 +3,7 @@
 import pytest
 
 from agent_smith.agent import observation
-from agent_smith.extraction import ExtractionResult
+from agent_smith.extraction import ExtractionResult, Strategy
 from agent_smith.sandbox import feedback
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
@@ -109,3 +109,19 @@ def test_a_final_answer_that_carries_a_value_is_shown_rather_than_denied() -> No
     executed = ExecResult(outcome=Outcome.FINAL_ANSWER, final_answer="the answer")
 
     assert observation.from_execution(executed) == "the answer"
+
+
+def test_a_comments_only_block_is_told_what_it_is_missing() -> None:
+    # "Send a well-formed code block" is the wrong correction here: the block
+    # was well formed. What has to change is where the reasoning went.
+    said = observation.from_extraction(
+        ExtractionResult(
+            strategy=Strategy.FENCED,
+            failure="Your fenced block holds only comments.",
+            only_comments=True,
+        )
+    )
+
+    assert "only comments" in said
+    assert "Comments do not run" in said
+    assert feedback.FORMATS not in said
