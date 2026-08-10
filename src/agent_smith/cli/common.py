@@ -8,12 +8,38 @@ anything here twice.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeVar
 
-from agent_smith.config import ResolvedConfig
+from pydantic import BaseModel, ValidationError
+
+from agent_smith.config import ConfigError, ResolvedConfig
 from agent_smith.llm.keypool import KeyPool
 from agent_smith.llm.retry import RetryingProvider
 from agent_smith.models.contract import SolutionOutput
 
+TaskInput = TypeVar("TaskInput", bound=BaseModel)
+
+
+def load_task(path: Path, model: type[TaskInput], benchmark: str) -> TaskInput:
+    """Read a task file into `model`, or say why it could not be read.
+
+    `benchmark` names the format in the failure -- "MBPP", "SWE-bench" -- so a
+    task file handed to the wrong CLI says so, which the model's own name would
+    not: `MBPPTaskInput` is what the code calls it, not what the caller typed.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as unreadable:
+        raise ConfigError(
+            f"cannot read the task file {path}: {unreadable}"
+        ) from unreadable
+
+    try:
+        return model.model_validate_json(raw)
+    except ValidationError as malformed:
+        raise ConfigError(
+            f"{path} is not a valid {benchmark} task file: {malformed}"
+        ) from malformed
 RETRY_SHARE_OF_WALL_CLOCK = 6.0
 """How much of a task's clock one completion may spend being retried.
 
