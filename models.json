@@ -10,6 +10,28 @@
         }
       }
     },
+    "mistral": {
+      "base_url": "https://api.mistral.ai/v1",
+      "default_model": "magistral-small-latest",
+      "models": {
+        "mistral-medium-latest": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        },
+        "codestral-2508": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        },
+        "devstral-medium-latest": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        },
+        "magistral-small-latest": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        }
+      }
+    },
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
       "default_model": "qwen/qwen3-235b-a22b-2507",

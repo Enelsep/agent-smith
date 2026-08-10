@@ -110,6 +110,49 @@ class DockerManager:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Exception during container dependency bootstrap: {exc}")
 
+    def cut_network(self) -> None:
+        """Detach the container from every network it is on.
+
+        The sandbox denies the worker a socket, but `run_command` runs a shell
+        inside this container, where that guard does not reach. A container with
+        a route out is one an agent can fetch a published fix through, and the
+        subject scores that zero. Nothing legitimate needs the route once the
+        tools are installed: the repository is checked out and the tests run
+        offline.
+
+        Failure is logged, not raised. A container with no network to remove is
+        already in the state this wants, and a task must not die on a cleanup
+        step this late in startup.
+        """
+        if self.container_id is None:
+            return
+        inspected = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+                self.container_id,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for network in inspected.stdout.split():
+            detached = subprocess.run(
+                ["docker", "network", "disconnect", network, self.container_id],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if detached.returncode != 0:
+                logger.warning(
+                    f"Could not detach the container from {network}: "
+                    f"{detached.stderr.strip()}"
+                )
+            else:
+                logger.info(f"Detached the container from {network}.")
+
     def start(self) -> None:
         """Pulls the image if necessary, starts the container, and bootstraps tools."""
         # 4. Startup sweep
@@ -155,7 +198,10 @@ class DockerManager:
         try:
             res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
             self.container_id = res.stdout.strip()
+            # Bootstrap first: installing the tools is the one step that needs
+            # a route out, and it happens before the agent has any say.
             self.bootstrap_dependencies()
+            self.cut_network()
         except Exception:
             self.cleanup()
             raise

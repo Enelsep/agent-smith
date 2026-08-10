@@ -137,3 +137,27 @@ def test_a_result_always_has_exactly_one_of_code_or_failure() -> None:
     for text in ["result = 1", "prose only", "<tool_call>{{{</tool_call>"]:
         result = extract_code(text, step=1)
         assert (result.code is None) != (result.failure is None)
+
+
+def test_a_block_of_nothing_but_comments_is_not_runnable_code() -> None:
+    # Mistral spent a whole 1 500-token budget planning in comments on task
+    # 260. The block parses and runs, so the sandbox has nothing to say about
+    # it; unless the extractor names it, the model is told it printed nothing.
+    result = extract_code(
+        "```python\n# first, iterate over the list\n# then return the max\n```",
+        step=1,
+    )
+
+    assert result.code is None
+    assert result.only_comments is True
+    assert result.failure is not None
+    assert "only comments" in result.failure
+
+
+def test_code_that_follows_its_comments_is_still_code() -> None:
+    result = extract_code(
+        "```python\n# return the max\nprint(max([1, 2]))\n```", step=1
+    )
+
+    assert result.code is not None
+    assert result.only_comments is False

@@ -16,6 +16,11 @@ class LLMResponse(BaseModel):
     `retries` is `0` on a response the provider builds, which the contract
     defines as "the first attempt succeeded". The retry layer records a higher
     count with `after_retries()`.
+
+    `cut_short` is the endpoint's own `finish_reason == "length"`: the reply
+    stops at the token cap rather than where the model meant to end it. It is
+    not part of `StepMetrics`; it exists so the loop can tell the model that
+    what it is reading back is a truncation and not a rejection.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -27,6 +32,7 @@ class LLMResponse(BaseModel):
     model: str
     api_url: str
     retries: int = 0
+    cut_short: bool = False
 
     def after_retries(self, count: int) -> "LLMResponse":
         """The same completion, recording how many attempts it took to get it.

@@ -8,6 +8,16 @@ from agent_smith.config import ConfigError
 from agent_smith.llm import KeySource
 from agent_smith.llm.errors import ProviderError
 from agent_smith.llm.keypool import DEFAULT_COOLDOWN_SECONDS, AllKeysParked, KeyPool
+from agent_smith.llm.retry import DEFAULT_MAX_ELAPSED_SECONDS
+
+
+def test_a_parked_key_reopens_within_the_budget_the_retry_loop_allows() -> None:
+    # The two constants were chosen apart and stopped agreeing: a 60 s cooldown
+    # against a 20 s retry budget meant `_sleep_if_it_fits` always refused, so
+    # every rate limit that parked the pool ended the run instead of costing it
+    # a wait. Measured 2026-08-09: runs carrying a moulinette-validated patch
+    # were discarded that way.
+    assert DEFAULT_COOLDOWN_SECONDS < DEFAULT_MAX_ELAPSED_SECONDS
 
 
 class FakeClock:
@@ -59,6 +69,10 @@ PENALTIES: list[tuple[str, ProviderError, float | None]] = [
     ("429 with zero", rate_limited("0"), DEFAULT_COOLDOWN_SECONDS),
     ("429 with a negative wait", rate_limited("-5"), DEFAULT_COOLDOWN_SECONDS),
     ("401", ProviderError("unauthorized", status_code=401), math.inf),
+    # A monthly allowance does not reopen inside a run, so the key is parked
+    # for good rather than cooled down. Measured 2026-08-09: six runs ended on
+    # a 402 while the second key of the pool was answering 200.
+    ("402", ProviderError("payment required", status_code=402), math.inf),
     ("403", ProviderError("forbidden", status_code=403), math.inf),
     ("500", ProviderError("boom", status_code=500), None),
     ("503", ProviderError("overloaded", status_code=503), None),

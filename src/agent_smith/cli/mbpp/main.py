@@ -11,11 +11,13 @@ import argparse
 import sys
 from pathlib import Path
 
+from agent_smith.agent import observation
 from agent_smith.agent.loop import (
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_WALL_CLOCK_SECONDS,
+    AnswerValidator,
     run_task,
 )
 from agent_smith.agent.task import TaskSpec
@@ -25,6 +27,7 @@ from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError, resolve_config
 from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
 from agent_smith.sandbox.process import Sandbox
+from agent_smith.sandbox.protocol import Outcome
 
 BENCHMARK = "mbpp"
 
@@ -75,6 +78,55 @@ def build_task_spec(task: MBPPTaskInput, system_prompt: str) -> TaskSpec:
     )
 
 
+REFUSED = (
+    "final_answer refused: run against the task's own tests, the source you "
+    "submitted did not pass them.\n\n{failure}\n\nFix the function, run those "
+    "same assertions until they raise nothing, then submit again."
+)
+
+
+def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
+    """Refuse a submission that does not survive the task's visible tests.
+
+    The prompt asks the model to run the assertions before it submits; nothing
+    made it. So the submitted string — not the code the model happened to run
+    last — is executed here against those same assertions, which is the closest
+    this side can get to what the solution will be judged on.
+
+    The assertions run one at a time, and the failing one is quoted into the
+    refusal: the sandbox `exec`s a string, so its traceback can only point at
+    `<string>`, and a bare `AssertionError` names nothing the model can act on.
+
+    The worker is restarted first, so the submission is judged alone. The
+    namespace the loop has been driving still holds every helper the model
+    defined along the way, and a submission that leans on one of them passes
+    here and raises `NameError` in front of the grader — the single failure this
+    exists to catch.
+
+    A task carrying no visible tests has nothing to check against, and running
+    the source on its own would refuse a good answer for printing nothing.
+    """
+
+    def validate(submitted: str) -> str | None:
+        if not task.test_list:
+            return None
+        sandbox.restart()
+        blocks = ["\n".join([*task.test_imports, submitted]), *task.test_list]
+        for index, block in enumerate(blocks):
+            ran = sandbox.execute(block)
+            if ran.outcome is Outcome.OK:
+                continue
+            failure = observation.from_execution(ran)
+            # index 0 is the definition, whose own source the model just wrote
+            # and can see; every other block is an assertion it needs named.
+            return REFUSED.format(
+                failure=failure if index == 0 else f"{block}\n\n{failure}"
+            )
+        return None
+
+    return validate
+
+
 def solve(args: argparse.Namespace) -> SolutionOutput:
     """Run one task to a solution. Never raises."""
     try:
@@ -116,6 +168,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS,
                 max_tokens_per_call=config.max_tokens,
+                validate_answer=build_validator(task, sandbox),
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return _failed(task_id, f"the run could not start: {unexpected}")

@@ -284,6 +284,22 @@ class TestCompleteResponse:
         response = _recording_provider(sent, body=body).complete(_PROMPT)
         assert response.model == "llama-3.3-70b-versatile"
 
+    def test_a_reply_stopped_at_the_token_cap_is_marked_as_cut_short(self) -> None:
+        sent: list[httpx.Request] = []
+        body = _completion_body(content="# I will first consider the")
+        body["choices"][0]["finish_reason"] = "length"
+
+        assert _recording_provider(sent, body=body).complete(_PROMPT).cut_short is True
+
+    def test_a_reply_that_ended_on_its_own_is_not(self) -> None:
+        # Including one from an endpoint that reports no finish_reason at all.
+        sent: list[httpx.Request] = []
+        body = _completion_body()
+        body["choices"][0]["finish_reason"] = "stop"
+
+        assert _recording_provider(sent, body=body).complete(_PROMPT).cut_short is False
+        assert _recording_provider(sent).complete(_PROMPT).cut_short is False
+
     def test_a_first_attempt_that_succeeds_reports_no_retries(self) -> None:
         sent: list[httpx.Request] = []
         assert _recording_provider(sent).complete(_PROMPT).retries == 0
