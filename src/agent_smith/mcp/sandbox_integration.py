@@ -42,12 +42,31 @@ def create_tool_stub(
         A synchronous function mimicking the real tool's name and docstring.
     """
 
-    def stub(**kwargs: Any) -> str:
-        # We enforce kwargs because MCP input schemas define JSON objects.
+    # The schema's property order, which is the signature a model writes when
+    # it writes one. MCP itself takes a JSON object and has no positions, but
+    # `search_code("coth")` is what models produce, and refusing it cost 117
+    # steps out of 240 in one campaign -- half the iterations, spent on a
+    # TypeError naming an internal function.
+    order = list(tool_def.input_schema.get("properties", {}))
+
+    def stub(*args: Any, **kwargs: Any) -> str:
+        if len(args) > len(order):
+            return (
+                f"{tool_def.name} takes at most {len(order)} arguments "
+                f"({', '.join(order) or 'none'}), and {len(args)} were given."
+            )
+        named = dict(zip(order, args, strict=False))
+        clash = named.keys() & kwargs.keys()
+        if clash:
+            return (
+                f"{tool_def.name} got {', '.join(sorted(clash))} twice, once by "
+                "position and once by name."
+            )
+        named.update(kwargs)
         logger.debug(
-            f"Sandbox stub called for tool '{tool_def.name}' with args: {kwargs}"
+            f"Sandbox stub called for tool '{tool_def.name}' with args: {named}"
         )
-        return ipc_request_fn(tool_def.name, kwargs)
+        return ipc_request_fn(tool_def.name, named)
 
     stub.__name__ = tool_def.name
     stub.__doc__ = tool_def.description
