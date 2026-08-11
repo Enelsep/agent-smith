@@ -216,7 +216,8 @@ def test_running_out_of_attempts_raises_the_last_error_seen() -> None:
             ProviderError("first", status_code=500),
             ProviderError("second", status_code=500),
             ProviderError("third", status_code=500),
-        ]
+        ],
+        max_attempts=3,
     )
 
     with pytest.raises(ProviderError, match="third"):
@@ -231,7 +232,8 @@ def test_the_last_attempt_does_not_sleep() -> None:
             ProviderError("boom", status_code=500),
             ProviderError("boom", status_code=500),
             ProviderError("boom", status_code=500),
-        ]
+        ],
+        max_attempts=3,
     )
 
     with pytest.raises(ProviderError):

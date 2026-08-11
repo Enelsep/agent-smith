@@ -10,9 +10,10 @@ from agent_smith.llm.keypool import AllKeysParked, KeyPool
 from agent_smith.llm.protocol import Message
 from agent_smith.llm.response import LLMResponse
 
-# Three attempts, because the budget below is what actually stops the loop and
-# a count is only the backstop against an endpoint failing instantly forever.
-DEFAULT_MAX_ATTEMPTS = 3
+# High enough that the budget below is what stops the loop, which is what the
+# count is here to let happen: a rotation costs no time, so a pool of two keys
+# spends two attempts reaching the parked state it then has to sit out.
+DEFAULT_MAX_ATTEMPTS = 100
 
 # A sixth of one MBPP task's 120 s, which several calls have to share. Shorter
 # than the 30 s socket timeout, so an endpoint that hangs gets one attempt and
