@@ -6,27 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from agent_swebench.docker import CONTAINER_LABEL, DockerManager
-
-
-def test_sweep_orphans() -> None:
-    with patch("subprocess.run") as mock_run:
-        mock_run.side_effect = [
-            MagicMock(stdout="cid123\ncid456\n", returncode=0),
-            MagicMock(returncode=0),
-            MagicMock(returncode=0),
-        ]
-        DockerManager.sweep_orphans()
-
-        assert mock_run.call_count == 3
-        first_call = mock_run.call_args_list[0][0][0]
-        assert first_call == [
-            "docker",
-            "ps",
-            "-aq",
-            "--filter",
-            f"label={CONTAINER_LABEL}",
-        ]
+from agent_swebench.docker import DockerManager
 
 
 def test_docker_manager_context_manager() -> None:
@@ -146,18 +126,6 @@ def test_exec_timeout_expired_bytes_and_str() -> None:
         assert code == -1
         assert out == "partial str stdout"
         assert "Execution timed out after 5.0 seconds." in err
-
-
-def test_atexit_handler_registration_and_cleanup() -> None:
-    with (
-        patch("atexit.register") as mock_register,
-        patch("atexit.unregister") as mock_unregister,
-    ):
-        mgr = DockerManager("test-image:latest", "test-container")
-        mock_register.assert_called_once_with(mgr._atexit_handler)
-
-        mgr.cleanup()
-        mock_unregister.assert_called_once_with(mgr._atexit_handler)
 
 
 def test_bootstrap_dependencies_success() -> None:
@@ -334,7 +302,6 @@ def test_the_route_out_is_cut_after_the_bootstrap_that_needs_it() -> None:
     with (
         patch("subprocess.run") as mock_run,
         patch("subprocess.Popen") as mock_popen,
-        patch.object(mgr, "sweep_orphans"),
         patch.object(
             mgr, "bootstrap_dependencies", side_effect=lambda: order.append("bootstrap")
         ),

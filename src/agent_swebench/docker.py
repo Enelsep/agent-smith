@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import contextlib
 import logging
 import subprocess
@@ -19,11 +18,9 @@ CONTAINER_LABEL = "agent-smith-swe=true"
 class DockerManager:
     """Docker lifecycle manager for SWE-bench.
 
-    Guarantees cleanup via:
-    1. Context Manager (__enter__ / __exit__)
-    2. Internal try...finally blocks
-    3. atexit handler
-    4. Startup orphan sweep
+    The container is removed on the way out by whoever owns this object, and
+    by `start()` itself if it fails partway. Neither runs under `kill -9`, so
+    the container is also tied to this process's lifetime -- see `start()`.
 
     `mounts` are read-only bind mounts, given as `(host path, container path)`
     and applied at `docker run`. They are how the tool server and the package
@@ -45,10 +42,6 @@ class DockerManager:
         self.mounts = list(mounts or [])
         self._runner: subprocess.Popen[bytes] | None = None
 
-        # 3. Register atexit handler for global process safety
-        self._atexit_handler = self.cleanup
-        atexit.register(self._atexit_handler)
-
     def _await_running(self, timeout: float = 30.0) -> None:
         """Block until the container is up, since `docker run -i` does not."""
         deadline = time.monotonic() + timeout
@@ -63,33 +56,6 @@ class DockerManager:
                 return
             time.sleep(0.1)
         raise RuntimeError(f"the container did not start within {timeout} seconds")
-
-    # ------------------------------------------------------------------
-    # 4. Startup Orphan Sweep
-    # ------------------------------------------------------------------
-    @classmethod
-    def sweep_orphans(cls) -> None:
-        """Cleans up orphan containers remaining active from a previous crash.
-
-        Note: Assumes exclusive ownership of the CONTAINER_LABEL on this machine.
-        Should only be used in single-run environments where no concurrent
-        benchmark tasks share this label.
-        """
-        logger.info("Sweeping orphan Docker containers...")
-        try:
-            cmd = ["docker", "ps", "-aq", "--filter", f"label={CONTAINER_LABEL}"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            container_ids = [
-                cid.strip() for cid in result.stdout.strip().split() if cid.strip()
-            ]
-
-            for cid in container_ids:
-                logger.warning(f"Removing orphan container: {cid}")
-                subprocess.run(
-                    ["docker", "rm", "-f", cid], capture_output=True, check=False
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"Failed during orphan sweep: {e}")
 
     # ------------------------------------------------------------------
     # Lifecycle Methods
@@ -186,9 +152,6 @@ class DockerManager:
 
     def start(self) -> None:
         """Pulls the image if necessary, starts the container, and bootstraps tools."""
-        # 4. Startup sweep
-        self.sweep_orphans()
-
         # Preventive removal if a container with the same name already exists
         with contextlib.suppress(Exception):
             subprocess.run(
@@ -213,13 +176,16 @@ class DockerManager:
             )
 
         # Attached, holding the container's stdin, with `cat` as its command, so
-        # the container lives exactly as long as this process does. `kill -9`
-        # cannot be caught: the context manager, the `finally`, the atexit
-        # handler and the sweep above all miss it, and the container was
-        # measured still running ten seconds after the process was gone. A
-        # container outliving the run that owns it is a leak whoever is at the
-        # keyboard can see. Whatever kills us, the kernel closes this pipe,
-        # `cat` reads EOF, the container exits, and `--rm` clears it.
+        # the container lives exactly as long as this process does.
+        #
+        # Every other way of removing it is code that has to run, and `kill -9`
+        # runs none: measured, the container was still up ten seconds after the
+        # process was gone, and a container outliving the run that owns it is a
+        # leak anyone at the keyboard can see. Closing a file descriptor is not
+        # code, it is what the kernel does to a process that no longer exists --
+        # so whatever kills us, this pipe closes, `cat` reads EOF, the container
+        # exits and `--rm` clears it. Detached with `tail -f /dev/null` there was
+        # nothing holding the other end and nothing for the container to notice.
         run_cmd = [
             "docker",
             "run",
@@ -334,9 +300,6 @@ class DockerManager:
                 logger.error(f"Error while removing container {target}: {e}")
             finally:
                 self.container_id = None
-                if hasattr(self, "_atexit_handler"):
-                    with contextlib.suppress(Exception):
-                        atexit.unregister(self._atexit_handler)
 
     # ------------------------------------------------------------------
     # 1. Context Manager Protocol
