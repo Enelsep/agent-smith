@@ -7,7 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_smith.tools.run_tests import _parse_test_output, run_tests
+from agent_smith.tools.run_tests import (
+    FAILED_STATUS,
+    PASSED_STATUS,
+    _parse_test_output,
+    run_tests,
+)
 
 
 class TestRunTestsTool(unittest.TestCase):
@@ -17,6 +22,19 @@ class TestRunTestsTool(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_a_bash_evaluation_script_runs(self) -> None:
+        # Every SWE-bench task ships its evaluation as bash: `set -o pipefail`,
+        # `source`, `conda activate`. Under /bin/sh -- dash on Debian and on
+        # the task images -- the script dies on its second line, so the tool
+        # reported FAILED for a repository that was fine. Measured on
+        # django__django-11066: "/bin/sh: 2: set: Illegal option -o pipefail".
+        script = "#!/bin/bash\nset -uxo pipefail\necho '1 passed'\n"
+
+        result = run_tests(eval_script=script, directory=str(self.root))
+
+        self.assertIn(PASSED_STATUS, result)
+        self.assertNotIn("Illegal option", result)
 
     def test_parse_pytest_output(self) -> None:
         pytest_raw = (
@@ -79,3 +97,59 @@ class TestRunTestsTool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_script_that_ends_on_a_restore_does_not_pass_on_its_exit_code() -> None:
+    # Measured on `sympy__sympy-14711`: the evaluation script's last command is
+    # `git checkout <commit> <test file>`, which succeeds whatever the tests
+    # did, so the script exits 0 with a failing suite. A model reading PASSED
+    # there has no reason left to look for the bug.
+    from agent_smith.tools.run_tests import _parse_test_output
+
+    output = (
+        ": '>>>>> Start Test Output'\n"
+        "TypeError: A Vector must be supplied\n"
+        "=========== tests finished: 3 passed, 1 exceptions, in 2.22 seconds ====\n"
+        ": '>>>>> End Test Output'\n"
+        "+ git checkout c6753448b sympy/physics/vector/tests/test_vector.py\n"
+        "Updated 1 path from 0bd77345d\n"
+    )
+
+    passed, failed, _ = _parse_test_output(output)
+
+    assert passed == 3
+    assert failed == 1
+
+
+def test_what_the_restore_step_prints_is_not_read_as_a_result() -> None:
+    # Everything after the end marker is the script putting the checkout back.
+    from agent_smith.tools.run_tests import test_region
+
+    output = (
+        ": '>>>>> Start Test Output'\n"
+        "2 passed\n"
+        ": '>>>>> End Test Output'\n"
+        "FAILED to remove stale file\n"
+    )
+
+    assert "FAILED" not in test_region(output)
+
+
+def test_a_test_that_raised_counts_even_under_a_word_we_do_not_know() -> None:
+    from agent_smith.tools.run_tests import _parse_test_output
+
+    output = "1 passed\nTraceback (most recent call last):\n  ValueError: no\n"
+
+    _, failed, names = _parse_test_output(output)
+
+    assert failed == 1
+    assert names
+
+
+def test_a_script_that_died_on_its_own_syntax_does_not_pass() -> None:
+    # Measured: a model retyped the evaluation script into `run_tests`, lost
+    # part of a heredoc, and bash exited 2 at EOF -- after an earlier fragment
+    # had printed a passing count. Both halves have to agree.
+    result = run_tests(eval_script="echo '4 passed'; exit 2", directory=".")
+
+    assert FAILED_STATUS in result

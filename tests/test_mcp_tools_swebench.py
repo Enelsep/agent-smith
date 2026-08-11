@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -198,3 +199,24 @@ def test_a_context_search_runs_against_the_testbed(tmp_path: Path) -> None:
     # second line is the round trip this tool exists to save.
     assert "4> def calculate_sum(values):" in text
     assert "return sum(values)" in text
+
+
+def test_an_unparsable_line_is_skipped_rather_than_answered(tmp_path: Path) -> None:
+    # JSON-RPC answers a parse error with a null id; the MCP client's schema
+    # rejects a null id, its reader dies on the validation error, and the
+    # bridge hangs with no one left to answer. Measured: a campaign stopped for
+    # 25 minutes on one task. A line we cannot attribute gets no reply.
+    root = Path(__file__).resolve().parents[1]
+    served = subprocess.run(
+        [sys.executable, str(root / "mcp_tools_swebench.py")],
+        input='{ this is not json\n{"jsonrpc": "2.0", "id": 1, "method": "ping"}\n',
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        check=False,
+    )
+
+    replies = [line for line in served.stdout.splitlines() if line.strip()]
+    assert len(replies) == 1, served.stdout
+    assert json.loads(replies[0])["id"] == 1
+    assert "unparsable" in served.stderr

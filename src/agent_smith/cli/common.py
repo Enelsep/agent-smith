@@ -40,6 +40,8 @@ def load_task(path: Path, model: type[TaskInput], benchmark: str) -> TaskInput:
         raise ConfigError(
             f"{path} is not a valid {benchmark} task file: {malformed}"
         ) from malformed
+
+
 RETRY_SHARE_OF_WALL_CLOCK = 6.0
 """How much of a task's clock one completion may spend being retried.
 
