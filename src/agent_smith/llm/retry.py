@@ -10,11 +10,6 @@ from agent_smith.llm.keypool import AllKeysParked, KeyPool
 from agent_smith.llm.protocol import Message
 from agent_smith.llm.response import LLMResponse
 
-# High enough that the budget below is what stops the loop, which is what the
-# count is here to let happen: a rotation costs no time, so a pool of two keys
-# spends two attempts reaching the parked state it then has to sit out.
-DEFAULT_MAX_ATTEMPTS = 100
-
 # A sixth of one MBPP task's 120 s, which several calls have to share. Shorter
 # than the 30 s socket timeout, so an endpoint that hangs gets one attempt and
 # no more. CORE-5 passes a smaller number once it knows the real remaining wall
@@ -55,14 +50,10 @@ class ValidatingProvider(Protocol):
 def _backoff(attempt: int, jitter: Jitter) -> float:
     """Full jitter, so several keys hitting one provider spread out.
 
-    At the default attempt count the draws are `[0, 0.5]`, `[0, 1]` and
-    `[0, 2]`, and only the first two are ever slept on: the loop computes the
-    final attempt's delay and then breaks, so 1 s is the longest wait actually
-    taken.
-
-    The cap first clips at `attempt = 4`, where doubling reaches 8 s and would
-    spend a whole budget on one sleep. With the last draw discarded, that puts
-    it at `max_attempts = 6` before the cap changes any sleep a caller sees.
+    The draws are `[0, 0.5]`, `[0, 1]`, `[0, 2]` and so on, doubling until the
+    cap clips at `attempt = 4`: past there one sleep would otherwise swallow a
+    whole budget. Nothing counts the attempts any more, so what ends a run of
+    them is the budget refusing the next sleep.
     """
     return jitter(0.0, min(_BACKOFF_BASE_SECONDS * 2**attempt, _BACKOFF_CAP_SECONDS))
 
@@ -112,7 +103,6 @@ class RetryingProvider:
         inner: ValidatingProvider,
         pool: KeyPool,
         *,
-        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         max_elapsed_seconds: float = DEFAULT_MAX_ELAPSED_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -120,7 +110,6 @@ class RetryingProvider:
     ) -> None:
         self._inner = inner
         self._pool = pool
-        self._max_attempts = max(1, max_attempts)
         self._max_elapsed_seconds = max_elapsed_seconds
         self._clock = clock
         self._sleep = sleep
@@ -139,9 +128,8 @@ class RetryingProvider:
         """One completion, retried while it is worth it and the budget allows."""
         started = self._clock()
         last_error: ProviderError | None = None
-        for attempt in range(self._max_attempts):
-            if attempt and self._elapsed(started) >= self._max_elapsed_seconds:
-                break
+        attempt = 0
+        while True:
             try:
                 answer = self._inner.complete(messages, stop, max_tokens)
             except AllKeysParked as parked:
@@ -156,13 +144,14 @@ class RetryingProvider:
                 wait = delay
             else:
                 return answer.after_retries(attempt)
-            if attempt + 1 == self._max_attempts:
+            attempt += 1
+            if self._elapsed(started) >= self._max_elapsed_seconds:
                 break
             if wait > 0 and not self._sleep_if_it_fits(wait, started):
                 break
-        # Dead at runtime — `max_attempts` is at least 1, so the loop always
-        # sets `last_error` before it ends. Kept because it is the narrowing
-        # that lets the next line raise: an `Optional` cannot be raised.
+        # Dead at runtime — the loop always makes one attempt before it can end,
+        # so `last_error` is set. Kept because it is the narrowing that lets the
+        # next line raise: an `Optional` cannot be raised.
         if last_error is None:  # pragma: no cover
             raise ProviderError("the retry loop made no attempt")
         raise last_error

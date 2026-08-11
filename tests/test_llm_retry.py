@@ -5,9 +5,9 @@ from collections.abc import Sequence
 import pytest
 
 from agent_smith.llm import LLMResponse, Message, ProviderError
-from agent_smith.llm.keypool import AllKeysParked, KeyPool
+from agent_smith.llm.keypool import _KEY_REJECTED, _RATE_LIMITED, AllKeysParked, KeyPool
 from agent_smith.llm.retry import (
-    DEFAULT_MAX_ATTEMPTS,
+    _ROTATE_NOW,
     DEFAULT_MAX_ELAPSED_SECONDS,
     RetryingProvider,
 )
@@ -103,7 +103,6 @@ def build(
     script: Sequence[object],
     keys: Sequence[str] = ("a", "b", "c"),
     *,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     max_elapsed_seconds: float = DEFAULT_MAX_ELAPSED_SECONDS,
     call_cost: float = 0.0,
 ) -> tuple[RetryingProvider, FakeProvider, FakeClock, FakeSleep]:
@@ -114,7 +113,6 @@ def build(
     retrier = RetryingProvider(
         inner,
         pool,
-        max_attempts=max_attempts,
         max_elapsed_seconds=max_elapsed_seconds,
         clock=clock,
         sleep=sleep,
@@ -210,17 +208,18 @@ def test_an_error_another_attempt_cannot_fix_is_raised_at_once(status: int) -> N
     assert sleep.calls == []
 
 
-def test_running_out_of_attempts_raises_the_last_error_seen() -> None:
+def test_running_out_of_budget_raises_the_last_error_seen() -> None:
     retrier, _, _, _ = build(
         [
             ProviderError("first", status_code=500),
             ProviderError("second", status_code=500),
             ProviderError("third", status_code=500),
         ],
-        max_attempts=3,
+        max_elapsed_seconds=2.0,
+        call_cost=1.0,
     )
 
-    with pytest.raises(ProviderError, match="third"):
+    with pytest.raises(ProviderError, match="second"):
         retrier.complete(MESSAGES)
 
 
@@ -233,13 +232,14 @@ def test_the_last_attempt_does_not_sleep() -> None:
             ProviderError("boom", status_code=500),
             ProviderError("boom", status_code=500),
         ],
-        max_attempts=3,
+        max_elapsed_seconds=2.0,
+        call_cost=1.0,
     )
 
     with pytest.raises(ProviderError):
         retrier.complete(MESSAGES)
 
-    assert sleep.calls == [0.5, 1.0]
+    assert sleep.calls == [0.5]
 
 
 def test_it_forwards_the_startup_check_to_the_provider_it_wraps() -> None:
@@ -382,3 +382,29 @@ def test_a_slow_endpoint_exhausts_the_budget_without_ever_sleeping() -> None:
 
     assert sleep.calls == []
     assert len(inner.used_keys) == 2
+
+
+def test_a_zero_delay_error_always_costs_the_key_that_earned_it() -> None:
+    # What makes a loop bounded only by elapsed time safe. `_retry_delay`
+    # returns 0.0 for these, so the next attempt goes out immediately -- and
+    # nothing would end the loop if the same key came back round. It cannot:
+    # every status that rotates without waiting also parks the key it was lent,
+    # so a pool of N keys reaches `AllKeysParked` in N attempts and then has a
+    # real wait to sit out. The two sets live in different modules; this is the
+    # line that stops them drifting apart.
+    assert _ROTATE_NOW == _KEY_REJECTED | {_RATE_LIMITED}
+
+
+def test_the_pool_running_dry_ends_the_loop_rather_than_spinning() -> None:
+    # The same invariant, exercised: three keys, every one rate limited, no
+    # wall clock spent on the calls themselves. The loop cannot turn forever.
+    retrier, inner, _, _ = build(
+        [ProviderError("slow down", status_code=429)] * 3,
+        keys=("a", "b", "c"),
+        max_elapsed_seconds=5.0,
+    )
+
+    with pytest.raises(AllKeysParked):
+        retrier.complete(MESSAGES)
+
+    assert inner.used_keys == ["a", "b", "c"]
