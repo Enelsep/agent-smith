@@ -4,6 +4,8 @@ import atexit
 import contextlib
 import logging
 import subprocess
+import time
+from collections.abc import Sequence
 from pathlib import Path
 from types import TracebackType
 
@@ -22,16 +24,45 @@ class DockerManager:
     2. Internal try...finally blocks
     3. atexit handler
     4. Startup orphan sweep
+
+    `mounts` are read-only bind mounts, given as `(host path, container path)`
+    and applied at `docker run`. They are how the tool server and the package
+    it dispatches to reach the container: a mount rewrites no ownership, where
+    a transfer builds a tar carrying the host's UID and asks the daemon to
+    restore it. Under a rootless daemon whose user sits outside the subuid
+    range, that restore fails and nothing gets in at all.
     """
 
-    def __init__(self, image_name: str, container_name: str | None = None) -> None:
+    def __init__(
+        self,
+        image_name: str,
+        container_name: str | None = None,
+        mounts: Sequence[tuple[Path, str]] | None = None,
+    ) -> None:
         self.image_name = image_name
         self.container_name = container_name or f"swe-bench-{id(self)}"
         self.container_id: str | None = None
+        self.mounts = list(mounts or [])
+        self._runner: subprocess.Popen[bytes] | None = None
 
         # 3. Register atexit handler for global process safety
         self._atexit_handler = self.cleanup
         atexit.register(self._atexit_handler)
+
+    def _await_running(self, timeout: float = 30.0) -> None:
+        """Block until the container is up, since `docker run -i` does not."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", self.container_name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if state.stdout.strip() == "true":
+                return
+            time.sleep(0.1)
+        raise RuntimeError(f"the container did not start within {timeout} seconds")
 
     # ------------------------------------------------------------------
     # 4. Startup Orphan Sweep
@@ -181,23 +212,38 @@ class DockerManager:
                 f"Failed to pull {self.image_name} (attempting local fallback): {exc}"
             )
 
-        # Launch container in background (-d) with security label
+        # Attached, holding the container's stdin, with `cat` as its command, so
+        # the container lives exactly as long as this process does. `kill -9`
+        # cannot be caught: the context manager, the `finally`, the atexit
+        # handler and the sweep above all miss it, and the container was
+        # measured still running ten seconds after the process was gone. A
+        # container outliving the run that owns it is a leak whoever is at the
+        # keyboard can see. Whatever kills us, the kernel closes this pipe,
+        # `cat` reads EOF, the container exits, and `--rm` clears it.
         run_cmd = [
             "docker",
             "run",
-            "-d",
+            "-i",
+            "--rm",
             "--name",
             self.container_name,
             "--label",
             CONTAINER_LABEL,
-            self.image_name,
-            "tail",
-            "-f",
-            "/dev/null",
         ]
+        for source, destination in self.mounts:
+            run_cmd += ["-v", f"{source.resolve()}:{destination}:ro"]
+        run_cmd += [self.image_name, "cat"]
         try:
-            res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
-            self.container_id = res.stdout.strip()
+            self._runner = subprocess.Popen(
+                run_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # The name is the handle everything else uses, so there is no id to
+            # read back -- only a container to wait for.
+            self.container_id = self.container_name
+            self._await_running()
             # Bootstrap first: installing the tools is the one step that needs
             # a route out, and it happens before the agent has any say.
             self.bootstrap_dependencies()
@@ -205,27 +251,6 @@ class DockerManager:
         except Exception:
             self.cleanup()
             raise
-
-    def copy_in(self, source: Path, destination: str) -> None:
-        """Copy a file or directory from the host into the running container.
-
-        A failure carries what docker said. `CalledProcessError` renders only
-        the command and the exit status, and on a graded run the error field of
-        the solution file is the whole account of what went wrong.
-        """
-        if self.container_id is None:
-            raise RuntimeError("the container is not running")
-        copied = subprocess.run(
-            ["docker", "cp", str(source), f"{self.container_id}:{destination}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if copied.returncode != 0:
-            raise RuntimeError(
-                f"could not copy {source} into the container: "
-                f"{copied.stderr.strip() or copied.stdout.strip() or 'no output'}"
-            )
 
     def exec(
         self,

@@ -30,11 +30,15 @@ def test_sweep_orphans() -> None:
 
 
 def test_docker_manager_context_manager() -> None:
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="container_id_123", returncode=0)
+    with (
+        patch("subprocess.run") as mock_run,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        mock_run.return_value = MagicMock(stdout="true", returncode=0)
+        mock_popen.return_value = MagicMock(stdin=MagicMock(), returncode=None)
 
         with DockerManager("test-image:latest", "test-container") as mgr:
-            assert mgr.container_id == "container_id_123"
+            assert mgr.container_id == "test-container"
 
         # Cleanup must be executed when exiting the with block
         assert mgr.container_id is None
@@ -215,42 +219,45 @@ def test_start_triggers_bootstrap_dependencies() -> None:
 
     with (
         patch("subprocess.run") as mock_run,
+        patch("subprocess.Popen") as mock_popen,
         patch.object(mgr, "bootstrap_dependencies") as mock_bootstrap,
     ):
-        mock_run.side_effect = [
-            MagicMock(stdout="", returncode=0),  # sweep_orphans
-            MagicMock(returncode=0),  # preventive removal
-            MagicMock(returncode=0),  # docker pull
-            MagicMock(stdout="cid123\n", returncode=0),  # docker run
-            MagicMock(stdout="", returncode=0),  # cut_network: docker inspect
-        ]
+        mock_run.return_value = MagicMock(stdout="true", returncode=0)
+        mock_popen.return_value = MagicMock(stdin=MagicMock(), returncode=None)
 
         mgr.start()
 
-        assert mgr.container_id == "cid123"
+        assert mgr.container_id == "test-container"
         mock_bootstrap.assert_called_once()
 
 
-def test_a_failed_copy_in_says_what_docker_said() -> None:
-    # `CalledProcessError` renders the command and the exit status and drops
-    # stderr. On a graded run the solution's error field is the whole account.
-    mgr = DockerManager("test-image:latest", "test-container")
-    mgr.container_id = "cid123"
+def test_what_the_container_needs_is_mounted_read_only_at_run_time() -> None:
+    # Read-only because nothing in there is the container's to change, and a
+    # mount rather than a transfer because a transfer restores the host's UID
+    # inside the container, which a rootless daemon refuses.
+    mgr = DockerManager(
+        "test-image:latest",
+        "test-container",
+        mounts=[(Path("/host/server.py"), "/server.py")],
+    )
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="lstat //nonexistent: no such file"
-        )
+    with (
+        patch("subprocess.run") as mock_run,
+        patch("subprocess.Popen") as mock_popen,
+        patch.object(DockerManager, "bootstrap_dependencies"),
+        patch.object(DockerManager, "cut_network"),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="true", stderr="")
+        mock_popen.return_value = MagicMock(stdin=MagicMock(), returncode=None)
+        mgr.start()
 
-        with pytest.raises(RuntimeError, match="no such file"):
-            mgr.copy_in(Path("/nonexistent"), "/somewhere")
-
-
-def test_a_copy_into_a_container_that_is_not_running_is_refused() -> None:
-    mgr = DockerManager("test-image:latest", "test-container")
-
-    with pytest.raises(RuntimeError, match="not running"):
-        mgr.copy_in(Path("/anything"), "/somewhere")
+    launched = mock_popen.call_args.args[0]
+    assert "-v" in launched
+    assert launched[launched.index("-v") + 1] == "/host/server.py:/server.py:ro"
+    # The image and its command stay last, after every flag. `cat` because the
+    # container is meant to die when our end of its stdin closes.
+    assert launched[-2:] == ["test-image:latest", "cat"]
+    assert "-i" in launched and "--rm" in launched
 
 
 def test_locate_testbed_prefers_the_variable_the_image_sets() -> None:
@@ -326,13 +333,15 @@ def test_the_route_out_is_cut_after_the_bootstrap_that_needs_it() -> None:
 
     with (
         patch("subprocess.run") as mock_run,
+        patch("subprocess.Popen") as mock_popen,
         patch.object(mgr, "sweep_orphans"),
         patch.object(
             mgr, "bootstrap_dependencies", side_effect=lambda: order.append("bootstrap")
         ),
         patch.object(mgr, "cut_network", side_effect=lambda: order.append("cut")),
     ):
-        mock_run.return_value = MagicMock(stdout="abc123", returncode=0)
+        mock_run.return_value = MagicMock(stdout="true", returncode=0)
+        mock_popen.return_value = MagicMock(stdin=MagicMock(), returncode=None)
         mgr.start()
 
     assert order == ["bootstrap", "cut"]

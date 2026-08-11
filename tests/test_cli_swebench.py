@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -209,13 +210,13 @@ class TestTheRun:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # `mcp_tools_swebench.py` is a dispatcher over `agent_smith.tools`, and
-        # the image has never heard of us. Copying the server alone leaves the
+        # the image has never heard of us. Mounting the server alone leaves the
         # container with a file that cannot import its first line.
         budget_reaching_the_loop(tmp_path, monkeypatch)
 
         copied = {str(destination) for _, destination in COPIES}
         assert cli.SERVER_IN_CONTAINER in copied
-        assert cli.PACKAGE_PARENT_IN_CONTAINER in copied
+        assert cli.PACKAGE_IN_CONTAINER in copied
 
         _, args = CLIENTS[-1]
         assert f"PYTHONPATH={cli.PACKAGE_PARENT_IN_CONTAINER}" in args
@@ -319,8 +320,14 @@ class _Container:
 
     container_id = "cid-123"
 
-    def __init__(self, image: str, name: str | None = None) -> None:
+    def __init__(
+        self,
+        image: str,
+        name: str | None = None,
+        mounts: Sequence[tuple[Path, str]] | None = None,
+    ) -> None:
         self.image = image
+        COPIES.extend(mounts or [])
 
     def start(self) -> None: ...
 
@@ -329,9 +336,6 @@ class _Container:
 
     def locate_testbed(self) -> str:
         return "/testbed"
-
-    def copy_in(self, source: Path, destination: str) -> None:
-        COPIES.append((source, destination))
 
 
 class _Bridge:
