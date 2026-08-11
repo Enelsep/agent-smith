@@ -44,10 +44,13 @@ mkdir -p "$OUT/tasks"
 for id in "${TASKS[@]}"; do
   T="$OUT/tasks/$id.json"
   if [ ! -s "$T" ]; then
-    # Absolute, because the dump runs from inside moulinette/ and an OUT the
-    # caller gave as an absolute path would otherwise be pasted after a `../`.
+    # Resolved here rather than in the command below, because a substitution
+    # inside that subshell runs after the `cd` and would resolve a relative OUT
+    # against moulinette/ -- where it does not exist, leaving the directory
+    # empty and the dump writing to the filesystem root.
+    ABS="$(cd "$(dirname "$T")" && pwd)/$(basename "$T")"
     (cd moulinette && uv run moulinette_eval dump swebench --task_id "$id" \
-      --output "$(cd "$(dirname "$T")" && pwd)/$(basename "$T")") || exit 1
+      --output "$ABS") || exit 1
   fi
 
   for m in "${MODELS[@]}"; do
