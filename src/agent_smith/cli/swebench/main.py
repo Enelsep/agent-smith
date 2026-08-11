@@ -15,9 +15,11 @@ import argparse
 import contextlib
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from agent_smith.agent.loop import run_task
+from agent_smith.agent.loop import AnswerValidator, judged_once, run_task
 from agent_smith.agent.task import TaskSpec
 from agent_smith.cli import common
 from agent_smith.cli.common import build_provider, failed_run, write_solution
@@ -27,6 +29,7 @@ from agent_smith.config import ConfigError, resolve_config
 from agent_smith.mcp.client import UnifiedMCPClient
 from agent_smith.models.contract import SolutionOutput, SWEBenchTaskInput
 from agent_smith.sandbox.process import Sandbox
+from agent_smith.tools.run_tests import PASSED_STATUS
 from agent_swebench.docker import DockerManager
 
 BENCHMARK = "swebench"
@@ -50,6 +53,53 @@ PACKAGE_SOURCE = Path(__file__).resolve().parents[2]
 PACKAGE_PARENT_IN_CONTAINER = "/"
 
 UNKNOWN_TASK_ID = "unknown"
+
+
+REFUSED = (
+    "final_answer refused: run against the task's own evaluation script, the "
+    "repository as you left it did not pass.\n\n{failure}\n\nFix the code, run "
+    "the tests until they pass, then submit again."
+)
+
+
+def build_validator(
+    task: SWEBenchTaskInput,
+    call_tool: Callable[[str, dict[str, Any]], str],
+    testbed: str,
+) -> AnswerValidator:
+    """Refuse a patch the task's own evaluation script does not accept.
+
+    MBPP-6 gave the loop the last say on a submission; this is the same idea
+    where the answer is a diff. A diff cannot be executed, but the repository
+    that produced it can: running the script here judges the state the patch
+    describes, which is what the grader will do with it.
+
+    The script runs through the tool bridge rather than on this machine, for
+    the reason the whole server runs in the container -- the checkout only
+    exists in there.
+
+    It ends by restoring the test files from git, so a model that edited them
+    to make its own life easier is judged on the real ones, and the working
+    tree is left as the submitted diff described it.
+
+    A run refused here is not lost: the loop keeps the last refused submission,
+    so a false refusal -- an evaluation slower than the tool's own timeout, say
+    -- costs iterations rather than the answer.
+    """
+
+    def validate(submitted: str) -> str | None:
+        if not task.eval_script.strip():
+            # Nothing to judge against. Refusing every answer would be worse
+            # than accepting one that was never checked.
+            return None
+        ran = call_tool(
+            "run_tests", {"eval_script": task.eval_script, "directory": testbed}
+        )
+        if PASSED_STATUS in ran:
+            return None
+        return REFUSED.format(failure=ran)
+
+    return validate
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -175,6 +225,9 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=remaining_wall_clock(time.monotonic() - started),
                 max_tokens_per_call=config.max_tokens,
+                validate_answer=judged_once(
+                    build_validator(task, bridge.call, testbed)
+                ),
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return _failed(task.instance_id, f"the run could not start: {unexpected}")

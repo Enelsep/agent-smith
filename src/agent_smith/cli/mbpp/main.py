@@ -18,6 +18,7 @@ from agent_smith.agent.loop import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_WALL_CLOCK_SECONDS,
     AnswerValidator,
+    judged_once,
     run_task,
 )
 from agent_smith.agent.task import TaskSpec
@@ -168,7 +169,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
                 max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
                 max_wall_clock_seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS,
                 max_tokens_per_call=config.max_tokens,
-                validate_answer=build_validator(task, sandbox),
+                validate_answer=judged_once(build_validator(task, sandbox)),
             )
     except Exception as unexpected:  # noqa: BLE001 - the boundary is the point
         return _failed(task_id, f"the run could not start: {unexpected}")
