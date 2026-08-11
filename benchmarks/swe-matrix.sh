@@ -22,6 +22,11 @@ OUT=${OUT:-benchmarks/runs}
 # disk survives: an image is several GB and only one has to be resident.
 # shellcheck disable=SC2206
 TASKS=(${TASKS:-django__django-11066 sympy__sympy-14711 sympy__sympy-13480})
+# Overridable the same way, so a campaign can hold the model axis fixed against
+# an earlier one and change a single thing. One entry per line: URL then model.
+if [ -n "${MODELS:-}" ]; then
+  mapfile -t MODELS <<< "$MODELS"
+else
 MODELS=(
   "https://api.mistral.ai/v1 mistral-medium-latest"
   "https://api.mistral.ai/v1 devstral-medium-latest"
@@ -29,6 +34,7 @@ MODELS=(
   "https://api.mistral.ai/v1 magistral-small-latest"
   "https://openrouter.ai/api/v1 qwen/qwen3-235b-a22b-2507"
 )
+fi
 
 # A model name carries slashes; a directory name cannot.
 slug() { echo "$1" | tr '/' '-'; }
