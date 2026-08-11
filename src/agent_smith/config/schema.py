@@ -33,6 +33,13 @@ class ProviderConfig(BaseModel):
     base_url: str
     default_model: str
     models: dict[str, ModelConfig] = Field(default_factory=dict)
+    benchmark_defaults: dict[str, str] = Field(default_factory=dict)
+    """The model to use for a named benchmark when the caller names none.
+
+    Optional, and empty means `default_model` answers for everything. It exists
+    because our two benchmarks disagree about which model to run: measured over
+    MBPP's 257 tasks and three SWE-bench tasks, one model wins each, and neither
+    margin is small enough to ignore."""
 
 
 class ModelsConfig(BaseModel):

@@ -164,6 +164,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
         config = resolve_config(
             provider_url=args.provider_url,
             model_name=args.model_name,
+            benchmark=BENCHMARK,
             env_file=args.env_file,
         )
     except ConfigError as unresolved:
