@@ -4,6 +4,7 @@ import atexit
 import contextlib
 import logging
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from types import TracebackType
 
@@ -22,12 +23,25 @@ class DockerManager:
     2. Internal try...finally blocks
     3. atexit handler
     4. Startup orphan sweep
+
+    `mounts` are read-only bind mounts, given as `(host path, container path)`
+    and applied at `docker run`. They are how the tool server and the package
+    it dispatches to reach the container: a mount rewrites no ownership, where
+    a transfer builds a tar carrying the host's UID and asks the daemon to
+    restore it. Under a rootless daemon whose user sits outside the subuid
+    range -- the school's machines -- that restore fails and nothing gets in.
     """
 
-    def __init__(self, image_name: str, container_name: str | None = None) -> None:
+    def __init__(
+        self,
+        image_name: str,
+        container_name: str | None = None,
+        mounts: Sequence[tuple[Path, str]] | None = None,
+    ) -> None:
         self.image_name = image_name
         self.container_name = container_name or f"swe-bench-{id(self)}"
         self.container_id: str | None = None
+        self.mounts = list(mounts or [])
 
         # 3. Register atexit handler for global process safety
         self._atexit_handler = self.cleanup
@@ -190,11 +204,10 @@ class DockerManager:
             self.container_name,
             "--label",
             CONTAINER_LABEL,
-            self.image_name,
-            "tail",
-            "-f",
-            "/dev/null",
         ]
+        for source, destination in self.mounts:
+            run_cmd += ["-v", f"{source.resolve()}:{destination}:ro"]
+        run_cmd += [self.image_name, "tail", "-f", "/dev/null"]
         try:
             res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
             self.container_id = res.stdout.strip()
@@ -205,27 +218,6 @@ class DockerManager:
         except Exception:
             self.cleanup()
             raise
-
-    def copy_in(self, source: Path, destination: str) -> None:
-        """Copy a file or directory from the host into the running container.
-
-        A failure carries what docker said. `CalledProcessError` renders only
-        the command and the exit status, and on a graded run the error field of
-        the solution file is the whole account of what went wrong.
-        """
-        if self.container_id is None:
-            raise RuntimeError("the container is not running")
-        copied = subprocess.run(
-            ["docker", "cp", str(source), f"{self.container_id}:{destination}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if copied.returncode != 0:
-            raise RuntimeError(
-                f"could not copy {source} into the container: "
-                f"{copied.stderr.strip() or copied.stdout.strip() or 'no output'}"
-            )
 
     def exec(
         self,

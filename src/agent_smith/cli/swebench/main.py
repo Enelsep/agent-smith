@@ -5,8 +5,8 @@ Docker image, and writes a `SolutionOutput` whose solution is the git patch.
 A crash scores as an automatic fail, so every path here ends in a written file.
 
 The tools run inside the container, not on this machine: `mcp_tools_swebench.py`
-is copied in and spoken to over `docker exec -i`, which is what lets it read and
-edit the checked-out repository at all.
+is mounted in and spoken to over `docker exec -i`, which is what lets it read
+and edit the checked-out repository at all.
 """
 
 from __future__ import annotations
@@ -47,9 +47,13 @@ SERVER_IN_CONTAINER = "/mcp_tools_swebench.py"
 
 # The server is a thin dispatcher over `agent_smith.tools`, so the package has
 # to travel with it. Nothing under `tools` imports beyond the standard library,
-# an optional `jedi` and one sibling module, so the copy needs no install and no
-# dependency of ours inside the image.
+# an optional `jedi` and one sibling module, so it is imported where it is
+# mounted and installed nowhere.
 PACKAGE_SOURCE = Path(__file__).resolve().parents[2]
+PACKAGE_IN_CONTAINER = "/agent_smith"
+
+# What `PYTHONPATH` points at, which is the directory holding the package, not
+# the package itself.
 PACKAGE_PARENT_IN_CONTAINER = "/"
 
 UNKNOWN_TASK_ID = "unknown"
@@ -173,12 +177,15 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
     try:
         with contextlib.ExitStack() as session:
             container = DockerManager(
-                task.docker_image, f"agent-smith-{task.instance_id}"
+                task.docker_image,
+                f"agent-smith-{task.instance_id}",
+                mounts=[
+                    (SERVER_SOURCE, SERVER_IN_CONTAINER),
+                    (PACKAGE_SOURCE, PACKAGE_IN_CONTAINER),
+                ],
             )
             container.start()
             session.callback(container.cleanup)
-            container.copy_in(SERVER_SOURCE, SERVER_IN_CONTAINER)
-            container.copy_in(PACKAGE_SOURCE, PACKAGE_PARENT_IN_CONTAINER)
 
             # Where the checkout actually is, asked of the image rather than
             # assumed: the tools all default to the working directory, and the

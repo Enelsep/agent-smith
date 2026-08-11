@@ -231,26 +231,34 @@ def test_start_triggers_bootstrap_dependencies() -> None:
         mock_bootstrap.assert_called_once()
 
 
-def test_a_failed_copy_in_says_what_docker_said() -> None:
-    # `CalledProcessError` renders the command and the exit status and drops
-    # stderr. On a graded run the solution's error field is the whole account.
-    mgr = DockerManager("test-image:latest", "test-container")
-    mgr.container_id = "cid123"
+def test_what_the_container_needs_is_mounted_read_only_at_run_time() -> None:
+    # Read-only because nothing in there is the container's to change, and a
+    # mount rather than a transfer because a transfer restores the host's UID
+    # inside the container, which a rootless daemon refuses.
+    mgr = DockerManager(
+        "test-image:latest",
+        "test-container",
+        mounts=[(Path("/host/server.py"), "/server.py")],
+    )
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="lstat //nonexistent: no such file"
-        )
+    with (
+        patch("subprocess.run") as mock_run,
+        patch.object(DockerManager, "bootstrap_dependencies"),
+        patch.object(DockerManager, "cut_network"),
+        patch.object(DockerManager, "sweep_orphans"),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="cid123", stderr="")
+        mgr.start()
 
-        with pytest.raises(RuntimeError, match="no such file"):
-            mgr.copy_in(Path("/nonexistent"), "/somewhere")
-
-
-def test_a_copy_into_a_container_that_is_not_running_is_refused() -> None:
-    mgr = DockerManager("test-image:latest", "test-container")
-
-    with pytest.raises(RuntimeError, match="not running"):
-        mgr.copy_in(Path("/anything"), "/somewhere")
+    launched = next(
+        call.args[0]
+        for call in mock_run.call_args_list
+        if call.args and call.args[0][:2] == ["docker", "run"]
+    )
+    assert "-v" in launched
+    assert launched[launched.index("-v") + 1] == "/host/server.py:/server.py:ro"
+    # The image and its command stay last, after every flag.
+    assert launched[-4:] == ["test-image:latest", "tail", "-f", "/dev/null"]
 
 
 def test_locate_testbed_prefers_the_variable_the_image_sets() -> None:
