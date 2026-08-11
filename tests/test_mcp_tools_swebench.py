@@ -220,6 +220,8 @@ def test_an_unparsable_line_is_skipped_rather_than_answered(tmp_path: Path) -> N
     assert len(replies) == 1, served.stdout
     assert json.loads(replies[0])["id"] == 1
     assert "unparsable" in served.stderr
+
+
 def test_run_tests_uses_the_script_the_harness_left_when_given_none(
     tmp_path: Path,
 ) -> None:
