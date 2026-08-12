@@ -14,7 +14,7 @@
       "base_url": "https://api.mistral.ai/v1",
       "default_model": "magistral-small-latest",
       "benchmark_defaults": {
-        "mbpp": "mistral-medium-latest",
+        "mbpp": "codestral-2508",
         "swebench": "magistral-small-latest"
       },
       "models": {
