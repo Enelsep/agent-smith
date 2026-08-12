@@ -18,11 +18,6 @@ from agent_smith.mcp.registry import MCPToolRegistry
 logger = logging.getLogger(__name__)
 
 
-# ==============================================================================
-# 1. SANDBOX SIDE (SYNC STUBS)
-# ==============================================================================
-
-
 def create_tool_stub(
     tool_def: MCPToolDefinition,
     ipc_request_fn: Callable[[str, dict[str, Any]], str],
@@ -42,11 +37,6 @@ def create_tool_stub(
         A synchronous function mimicking the real tool's name and docstring.
     """
 
-    # The schema's property order, which is the signature a model writes when
-    # it writes one. MCP itself takes a JSON object and has no positions, but
-    # `search_code("coth")` is what models produce, and refusing it cost 117
-    # steps out of 240 in one campaign -- half the iterations, spent on a
-    # TypeError naming an internal function.
     order = list(tool_def.input_schema.get("properties", {}))
 
     def stub(*args: Any, **kwargs: Any) -> str:
@@ -93,11 +83,6 @@ def get_sandbox_tool_stubs(
     return stubs
 
 
-# ==============================================================================
-# 2. ORCHESTRATOR / PARENT SIDE (ASYNC EXECUTION)
-# ==============================================================================
-
-
 async def execute_mcp_tool_call(
     registry: MCPToolRegistry,
     tool_name: str,
@@ -121,7 +106,6 @@ async def execute_mcp_tool_call(
 
     tool_wrapper = registry.tools[tool_name]
     try:
-        # Execute the actual network/async tool wrapper
         return await tool_wrapper(**arguments)
     except TypeError as exc:
         logger.error(f"Type error calling tool '{tool_name}': {exc}")
