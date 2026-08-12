@@ -37,6 +37,24 @@ TESTBED_ROOT = "/testbed"
 PATH_ARGUMENTS = frozenset({"filepath", "directory", "workdir"})
 
 
+EVAL_SCRIPT_PATH = "/eval_script.sh"
+
+
+def _task_eval_script() -> str:
+    """The task's evaluation script, as the harness left it in the container.
+
+    Empty when there is none — the sandbox exam runs this server outside any
+    container, and a task may ship no script. `run_tests` then falls back to
+    its own default rather than being handed an empty command.
+    """
+    path = os.environ.get("EVAL_SCRIPT_PATH", EVAL_SCRIPT_PATH)
+    try:
+        with open(path, encoding="utf-8") as script:
+            return script.read()
+    except OSError:
+        return ""
+
+
 def in_testbed(path: str) -> str:
     """Resolves a path written against the repository root."""
     testbed = get_testbed_path()
@@ -182,7 +200,11 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 },
                 {
                     "name": "run_tests",
-                    "description": "Run repository tests using an evaluation script.",
+                    "description": (
+                        "Run the task's own evaluation script and report what "
+                        "the tests did. Takes no arguments: the script is "
+                        "already here. Call it as run_tests()."
+                    ),
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -293,8 +315,16 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
             elif name == "run_tests":
                 directory = str(args.get("directory", testbed))
                 rt_kwargs: dict[str, Any] = {}
-                if "eval_script" in args and args["eval_script"] is not None:
-                    rt_kwargs["eval_script"] = str(args["eval_script"])
+                script = str(args.get("eval_script") or "").strip()
+                if not script:
+                    # The task's own script, put here by the harness. A model
+                    # asked to reproduce two thousand characters of bash gets
+                    # it wrong in every way bash allows, and it never had a
+                    # reason to: the script does not depend on anything the
+                    # model knows.
+                    script = _task_eval_script()
+                if script:
+                    rt_kwargs["eval_script"] = script
                 output = run_tests(directory=directory, **rt_kwargs)
 
             elif name == "get_patch":

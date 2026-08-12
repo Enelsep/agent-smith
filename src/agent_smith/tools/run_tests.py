@@ -49,12 +49,20 @@ def run_tests(
             # its second line and no run could ever be judged by it.
             executable="/bin/bash",
             cwd=str(root_path),
-            capture_output=True,
+            # One stream, in the order a terminal would show it. Captured
+            # separately and concatenated, the two arrive as a block of stdout
+            # followed by a block of stderr -- and a SWE-bench script prints
+            # its `>>>>> Start/End Test Output` markers from `set -x`, on
+            # stderr, while the tests report on stdout. `test_region` then
+            # slices a window that holds none of the results it exists to
+            # isolate: every verdict came back "0 passed, 0 failed".
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             timeout=timeout,
             check=False,
         )
-        raw_output = f"{process.stdout}\n{process.stderr}".strip()
+        raw_output = (process.stdout or "").strip()
         exit_code = process.returncode
     except subprocess.TimeoutExpired:
         return f"Error: Test execution timed out after {timeout} seconds."
@@ -85,9 +93,16 @@ def run_tests(
         for name in failing_names:
             lines.append(f"  - {name}")
 
-    if exit_code != 0 and raw_output:
+    # Every verdict short of PASSED carries the output it was read from. The
+    # counts above are a convenience; this is the evidence, and withholding it
+    # is what leaves a model with nowhere to go. Measured on sympy, whose
+    # `bin/test` prints a format the parser above does not recognise: the reply
+    # was two lines saying FAILED with nothing to act on, and five models spent
+    # every one of their thirty iterations there.
+    if not passed and raw_output:
         lines.append("\n--- Raw Output Snippet ---")
-        # Include tail of raw output to keep context manageable
+        # The tail, because a cumulative input ceiling is what limits the run
+        # and the failures are printed last.
         output_lines = raw_output.splitlines()
         snippet = (
             "\n".join(output_lines[-40:]) if len(output_lines) > 40 else raw_output

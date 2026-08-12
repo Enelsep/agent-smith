@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,12 +69,16 @@ class TestTheTaskPrompt:
         assert "adding a zero vector raises TypeError" in prompt
         assert "sympy/sympy" in prompt
 
-    def test_it_carries_the_eval_script_the_run_tests_tool_expects(self) -> None:
-        # `run_tests(eval_script, directory)` takes the script as an argument,
-        # so the model cannot call it without having been given the text.
+    def test_it_names_run_tests_without_quoting_the_script(self) -> None:
+        # The harness leaves the evaluation script in the container, so the
+        # model calls `run_tests()` with nothing. Quoting the script here cost
+        # ~2 000 characters a task against a cumulative ceiling, and every way
+        # a retype can fail: a dropped heredoc, a `/bin/bash` guessed in its
+        # place, a truncation past the output markers.
         prompt = task_prompt(A_TASK)
 
-        assert "pytest -q sympy/physics/vector/tests/test_vector.py" in prompt
+        assert "run_tests()" in prompt
+        assert "pytest -q sympy/physics/vector/tests/test_vector.py" not in prompt
 
     def test_hints_are_included_when_the_task_carries_them(self) -> None:
         prompt = task_prompt(A_TASK)
@@ -98,10 +103,10 @@ class TestTheHarnessJudgesTheSubmission:
 
         assert validate("diff --git a/x b/x") is None
         # Judged in the container, on the task's own script, not on whatever
-        # the model happened to run last.
-        assert calls == [
-            ("run_tests", {"eval_script": A_TASK.eval_script, "directory": "/testbed"})
-        ]
+        # the model happened to run last. The script is not passed: the server
+        # reads the copy the harness left beside it, which is the same text and
+        # cannot be mistyped on the way.
+        assert calls == [("run_tests", {"directory": "/testbed"})]
 
     def test_a_patch_that_fails_is_refused_with_what_failed(self) -> None:
         # Measured: a model submitted the right patch having never seen a test
@@ -205,13 +210,13 @@ class TestTheRun:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # `mcp_tools_swebench.py` is a dispatcher over `agent_smith.tools`, and
-        # the image has never heard of us. Copying the server alone leaves the
+        # the image has never heard of us. Mounting the server alone leaves the
         # container with a file that cannot import its first line.
         budget_reaching_the_loop(tmp_path, monkeypatch)
 
         copied = {str(destination) for _, destination in COPIES}
         assert cli.SERVER_IN_CONTAINER in copied
-        assert cli.PACKAGE_PARENT_IN_CONTAINER in copied
+        assert cli.PACKAGE_IN_CONTAINER in copied
 
         _, args = CLIENTS[-1]
         assert f"PYTHONPATH={cli.PACKAGE_PARENT_IN_CONTAINER}" in args
@@ -315,8 +320,14 @@ class _Container:
 
     container_id = "cid-123"
 
-    def __init__(self, image: str, name: str | None = None) -> None:
+    def __init__(
+        self,
+        image: str,
+        name: str | None = None,
+        mounts: Sequence[tuple[Path, str]] | None = None,
+    ) -> None:
         self.image = image
+        COPIES.extend(mounts or [])
 
     def start(self) -> None: ...
 
@@ -325,9 +336,6 @@ class _Container:
 
     def locate_testbed(self) -> str:
         return "/testbed"
-
-    def copy_in(self, source: Path, destination: str) -> None:
-        COPIES.append((source, destination))
 
 
 class _Bridge:
