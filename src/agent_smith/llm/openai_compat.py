@@ -20,9 +20,6 @@ from agent_smith.llm.protocol import KeySource, Message
 from agent_smith.llm.response import LLMResponse
 from agent_smith.llm.retry import RetryingProvider
 
-# A guard against a hung socket, not a budget. MBPP allows 120 s of wall clock
-# for a task that may take several iterations, so a request that has been
-# silent for 30 s has already cost too much. Budgets are CORE-5 and SWE-6.
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 

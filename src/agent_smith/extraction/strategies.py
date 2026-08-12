@@ -1,13 +1,3 @@
-"""Turning whatever the model wrote into a Python candidate.
-
-A strategy has three possible outcomes, which is why it does not simply return a
-string. `None` means the marker was absent. A `Candidate` means the marker was
-there and produced code, possibly after a repair the strategy performed while
-matching. `PayloadError` means the marker was there but its payload would not
-decode even after repair — a distinction the caller needs, both to name the
-strategy in the failure and to avoid spending a second repair on it.
-"""
-
 import ast
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -24,8 +14,6 @@ from agent_smith.extraction.normalise import (
 from agent_smith.extraction.repair import repair_json, repair_python
 from agent_smith.extraction.result import Strategy
 
-# The statement kinds that make a parsed tree worth executing. A module holding
-# nothing but a bare Name or Constant parses fine and does nothing.
 _ACTIONABLE = (
     ast.Call,
     ast.Assign,
@@ -100,17 +88,7 @@ def _parsed(code: str) -> ast.Module | None:
 
 
 def bare(text: str, _step: int) -> Candidate | None:
-    """Last resort: the whole message, if it is executable Python.
-
-    "The model forgot the fence" is one of the commonest malformations and every
-    marker-based strategy misses it. The actionable-node test is what keeps this
-    honest — prose almost never parses, but a one-word reply does.
-
-    A preamble is repaired here rather than by the caller. There is no marker to
-    delimit the code, so "where does the Python start" is this strategy's own
-    question — a reply of "Sure, here you go:" followed by a working line is a
-    hit, not a miss, and refusing it would cost an iteration to ask again.
-    """
+    """Last resort: the whole message, if it is executable Python."""
     code = text.strip()
     if not code:
         return None
@@ -142,8 +120,6 @@ class _ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-# Pydantic reports for a developer; these go to the model. Keyed by the field
-# the first error names, with the empty key standing for "not an object at all".
 _PROBLEMS = {
     "name": 'a tool call needs a non-empty string "name"',
     "arguments": "the call arguments must be a JSON object",

@@ -1,15 +1,3 @@
-"""Where a finished run spent its input budget.
-
-SWE-bench allows 300 000 cumulative input tokens and every observation stays in
-the transcript, so the cost of a run is dominated by what the tools hand back.
-This reads a `SolutionOutput` and says which tool produced what, so SWE-6 can
-fix the tool rather than guess at the prompt.
-
-Run it on a solution file:
-
-    uv run python -m agent_smith.agent.report path/to/solution.json
-"""
-
 from __future__ import annotations
 
 import re

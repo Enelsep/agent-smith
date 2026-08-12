@@ -1,13 +1,3 @@
-"""The situations the sandbox must never leave the model to guess about.The
-model has no view of the sandbox except the text it is handed back, so each of
-these has to say what happened *and* what to do about it.
-
-Every one of them is built by `notice`, so they share a shape the model only
-has to learn once:
-
-    [sandbox] <what happened>. <what to do next>.
-"""
-
 from __future__ import annotations
 
 PREFIX = "[sandbox]"

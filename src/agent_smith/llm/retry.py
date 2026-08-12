@@ -10,17 +10,10 @@ from agent_smith.llm.keypool import AllKeysParked, KeyPool
 from agent_smith.llm.protocol import Message
 from agent_smith.llm.response import LLMResponse
 
-# A sixth of one MBPP task's 120 s, which several calls have to share. Shorter
-# than the 30 s socket timeout, so an endpoint that hangs gets one attempt and
-# no more. CORE-5 passes a smaller number once it knows the real remaining wall
-# clock.
 DEFAULT_MAX_ELAPSED_SECONDS = 20.0
 
 _BACKOFF_BASE_SECONDS = 0.5
 _BACKOFF_CAP_SECONDS = 4.0
-
-# The families the pool has just parked a key for. Another key is already
-# waiting, so there is nothing to sleep for.
 _ROTATE_NOW = frozenset({401, 402, 403, 429})
 
 Jitter = Callable[[float, float], float]
@@ -149,9 +142,6 @@ class RetryingProvider:
                 break
             if wait > 0 and not self._sleep_if_it_fits(wait, started):
                 break
-        # Dead at runtime — the loop always makes one attempt before it can end,
-        # so `last_error` is set. Kept because it is the narrowing that lets the
-        # next line raise: an `Optional` cannot be raised.
         if last_error is None:  # pragma: no cover
             raise ProviderError("the retry loop made no attempt")
         raise last_error

@@ -1,14 +1,3 @@
-"""Internal models for `models.json`.
-
-Kept deliberately apart from `models/contract.py`: that file mirrors the
-contract the evaluation imposes on us and must not grow fields of our own.
-This one describes a catalogue we are free to change.
-
-`extra="forbid"` throughout, so a mistyped key is an error rather than a
-setting that silently stays on its default — `max_token` instead of
-`max_tokens` would otherwise cost us a truncated completion with no signal.
-"""
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -18,10 +7,6 @@ class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stop: list[str] = Field(default_factory=list)
-    # gt=0 for the same reason extra="forbid" is set above: a zero here
-    # reaches the endpoint as `max_tokens: 0`, which most OpenAI-compatible
-    # APIs reject outright, and the catalogue is the wrong place to find
-    # that out.
     max_tokens: int | None = Field(default=None, gt=0)
 
 
@@ -34,12 +19,6 @@ class ProviderConfig(BaseModel):
     default_model: str
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     benchmark_defaults: dict[str, str] = Field(default_factory=dict)
-    """The model to use for a named benchmark when the caller names none.
-
-    Optional, and empty means `default_model` answers for everything. It exists
-    because our two benchmarks disagree about which model to run: measured over
-    MBPP's 257 tasks and three SWE-bench tasks, one model wins each, and neither
-    margin is small enough to ignore."""
 
 
 class ModelsConfig(BaseModel):

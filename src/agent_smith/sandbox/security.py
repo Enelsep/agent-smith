@@ -1,10 +1,3 @@
-"""Sandbox security primitives.
-
-Everything that restricts what LLM-generated code may do lives here, so the
-worker stays readable and the guards can be unit-tested in isolation.
-
-"""
-
 from __future__ import annotations
 
 import ast

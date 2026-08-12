@@ -20,10 +20,6 @@ EMPTY_ANSWER = (
     "first and check that it took. Otherwise call final_answer() again, passing "
     "the answer itself as the argument."
 )
-"""Said whatever the benchmark. An MBPP run never calls `get_patch`, so the
-first sentence is inert there; naming it costs a handful of tokens in an
-observation that is already rare, and threading the benchmark down to here
-to save them would cost a parameter on every caller."""
 
 
 def from_extraction(result: ExtractionResult) -> str:
@@ -34,14 +30,9 @@ def from_extraction(result: ExtractionResult) -> str:
     account of what went wrong and adds the sandbox's own voice and the way
     out.
     """
-    # A block that holds only comments was framed correctly and reasoned in the
-    # wrong place: neither the format list nor "send a well-formed block" says
-    # anything it can act on.
     if result.only_comments:
         said = feedback.only_comments(result.failure)
     else:
-        # A strategy that matched and then failed means the model framed the
-        # block correctly and got the contents wrong; no format list needed.
         said = feedback.no_code_block(
             result.failure, saw_format=result.strategy is not None
         )
@@ -54,17 +45,10 @@ def from_execution(
     namespace_lost: bool = False,
     repair_note: str | None = None,
 ) -> str:
-    """The observation for a step whose code reached the sandbox.
-
-    The repair note leads, because it explains the code the model is about to
-    see the result of. The truncation and namespace warnings trail, because
-    they apply to what surrounds the result rather than to the result itself.
-    """
+    """The observation for a step whose code reached the sandbox."""
     parts = [] if repair_note is None else [feedback.repaired_code(repair_note)]
     parts.append(_body(executed))
     if executed.truncated:
-        # The worker leaves a marker inline where it cut; this says what the
-        # marker means and what to do instead of running the same thing again.
         parts.append(feedback.output_truncated())
     if namespace_lost:
         parts.append(NAMESPACE_LOST)
@@ -92,16 +76,12 @@ def _body(executed: ExecResult) -> str:
     """
     if executed.outcome is Outcome.FINAL_ANSWER:
         if executed.final_answer:
-            # The loop consumes an answer that carries a value and never asks
-            # for an observation, so this renders only for a caller that does.
             return executed.final_answer
         return EMPTY_ANSWER
     printed = combined_output(executed)
     if executed.outcome is Outcome.OK:
         return printed or NO_OUTPUT
     if executed.outcome is Outcome.SOFT_TIMEOUT:
-        # The worker's own error line says the limit was exceeded. What the
-        # model actually needs is that the output above stops mid-run.
         cut = feedback.partial_output(printed=bool(printed))
         return f"{printed}\n\n{cut}" if printed else cut
     detail = executed.error or f"The sandbox reported {executed.outcome.value}."

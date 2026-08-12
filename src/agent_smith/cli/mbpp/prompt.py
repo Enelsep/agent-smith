@@ -1,11 +1,3 @@
-"""What the MBPP agent tells the model, and what it tells it about the task.
-
-The system prompt itself lives in `agent_smith/prompts/mbpp.md`, so its wording
-can be revised without touching Python. This module fills its one placeholder
-and builds the per-task message. `SolutionOutput.system_prompt` records the
-result verbatim for provenance.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -17,14 +9,7 @@ from agent_smith.prompts import load_prompt
 def build_system_prompt(authorized_imports: Sequence[str]) -> str:
     """The system prompt, quoting the allowlist the sandbox will actually enforce.
 
-    The list is passed in rather than hardcoded so it cannot drift from
-    `sandbox_template.json`: a model told it may import something the sandbox
-    refuses spends an iteration finding out.
-
-    Substituted rather than formatted: the prompt is a file so that its wording
-    can be revised without touching Python, and `str.format` would make every
-    brace in it a field to resolve — a dict literal in an example would raise
-    at runtime, on a change no one would think of as a code change.
+    The list is passed in rather than hardcoded
     """
     return load_prompt("mbpp").replace("{imports}", ", ".join(authorized_imports))
 

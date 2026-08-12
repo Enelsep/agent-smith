@@ -1,11 +1,3 @@
-"""Turning the runtime inputs into the one object the rest of the system reads.
-
-`--provider-url`, `--model-name`, the supplied `.env` and the two JSON config
-files go in; a validated `ResolvedConfig` comes out. CORE-1 reads its endpoint
-and generation settings from it, CORE-2 builds its rotation pool from
-`api_keys`.
-"""
-
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -24,14 +16,6 @@ from agent_smith.config.loader import load_models_config, load_sandbox_config
 from agent_smith.config.schema import ModelsConfig
 from agent_smith.models.contract import SandboxConfig
 
-# Consulted only when no --provider-url is given: preferred over the rest of
-# the catalogue when the environment holds keys for several providers, and the
-# one a keyless environment falls back to, so the resulting error names its
-# variables instead of whichever provider happens to be last in models.json.
-#
-# Mistral because it is the one model measured over all 257 MBPP tasks, and the
-# only one that can be measured again: its free tier limits requests per second
-# where Groq's limits tokens per day, and a full batch does not fit in a day.
 DEV_DEFAULT_PROVIDER = "mistral"
 
 DEFAULT_MODELS_PATH = Path("models.json")
@@ -79,17 +63,7 @@ def resolve_config(
     env: Mapping[str, str] | None = None,
     env_file: Path | None = None,
 ) -> ResolvedConfig:
-    """Resolve the runtime configuration, or raise `ConfigError` explaining why not.
-
-    Pass `env` to work off an explicit mapping; leave it out and the process
-    environment is used, after `.env` has been loaded into it. `load_dotenv`
-    does not override variables that are already set, so a real environment
-    variable always wins over the file.
-
-    `benchmark` names the caller, so a provider that catalogues a model per
-    benchmark can answer with the right one. Omitted, or absent from the
-    catalogue, falls back to the provider's single `default_model`.
-    """
+    """Resolve the runtime configuration, or raise `ConfigError` explaining why not."""
     if env is None:
         load_dotenv(env_file)
         env = os.environ
@@ -110,16 +84,10 @@ def resolve_config(
                 f"no --model-name given and provider {provider_name!r} is absent from "
                 f"{models_path}, so there is no default model to fall back on"
             )
-        # The benchmark asking gets its own default when the catalogue names
-        # one. `--model-name` still outranks both: an operator who names a
-        # model means it, whichever benchmark is running.
         model_name = provider.benchmark_defaults.get(
             benchmark or "", provider.default_model
         )
 
-    # An endpoint or a model we have never catalogued is not an error: the
-    # point of SETUP-3 is that a new OpenAI-compatible provider works by
-    # changing the URL. It just runs on defaults instead of tuned settings.
     settings = provider.models.get(model_name) if provider is not None else None
 
     api_keys = discover_api_keys(prefix, env)
@@ -143,19 +111,7 @@ def resolve_config(
 def _default_url(
     catalogue: ModelsConfig, models_path: Path, env: Mapping[str, str]
 ) -> str:
-    """The endpoint to use when the caller named none, chosen from the keys.
-
-    The `.env` is written by whoever runs us — the subject's own example names
-    `OPENROUTER_API_KEY` — so a fixed default provider turns a perfectly good
-    key for another one into a fatal error before the first call. Each
-    catalogued provider is asked whether the environment carries a key under
-    its own prefix, and the first that does wins.
-
-    `DEV_DEFAULT_PROVIDER` is tried before the rest, so an environment holding
-    several keys resolves exactly as it did before this existed, and it is also
-    what a keyless environment falls back to, so the error names its variables
-    rather than the last provider in the file.
-    """
+    """The endpoint to use when the caller named none, chosen from the keys."""
     default = catalogue.providers.get(DEV_DEFAULT_PROVIDER)
     if default is None:
         raise ConfigError(

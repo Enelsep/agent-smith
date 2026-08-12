@@ -1,10 +1,3 @@
-"""The `agent_mbpp` command line entry point.
-
-Loads a task file, runs the agent loop against it, and writes a
-`SolutionOutput`. A crash scores as an automatic fail, so every path through
-this module ends in a written solution file.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -38,8 +31,6 @@ def _failed(task_id: str, error: str) -> SolutionOutput:
     return failed_run(BENCHMARK, task_id, error)
 
 
-# The id we report when the task file itself could not be read, since that is
-# where the real id would have come from.
 UNKNOWN_TASK_ID = "unknown"
 
 
@@ -87,26 +78,7 @@ REFUSED = (
 
 
 def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
-    """Refuse a submission that does not survive the task's visible tests.
-
-    The prompt asks the model to run the assertions before it submits; nothing
-    made it. So the submitted string — not the code the model happened to run
-    last — is executed here against those same assertions, which is the closest
-    this side can get to what the solution will be judged on.
-
-    The assertions run one at a time, and the failing one is quoted into the
-    refusal: the sandbox `exec`s a string, so its traceback can only point at
-    `<string>`, and a bare `AssertionError` names nothing the model can act on.
-
-    The worker is restarted first, so the submission is judged alone. The
-    namespace the loop has been driving still holds every helper the model
-    defined along the way, and a submission that leans on one of them passes
-    here and raises `NameError` in front of the grader — the single failure this
-    exists to catch.
-
-    A task carrying no visible tests has nothing to check against, and running
-    the source on its own would refuse a good answer for printing nothing.
-    """
+    """Refuse a submission that does not survive the task's visible tests."""
 
     def validate(submitted: str) -> str | None:
         if not task.test_list:
@@ -118,8 +90,6 @@ def build_validator(task: MBPPTaskInput, sandbox: Sandbox) -> AnswerValidator:
             if ran.outcome is Outcome.OK:
                 continue
             failure = observation.from_execution(ran)
-            # index 0 is the definition, whose own source the model just wrote
-            # and can see; every other block is an assertion it needs named.
             return REFUSED.format(
                 failure=failure if index == 0 else f"{block}\n\n{failure}"
             )
@@ -152,15 +122,6 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
             timeout=config.sandbox.max_execution_time_seconds,
             authorized_imports=config.sandbox.authorized_imports,
         ) as sandbox:
-            # The four limits of the subject, VI.1.1. Passed explicitly rather
-            # than left to `run_task`'s defaults so the budget this command runs
-            # under is readable here, and read from the loop's constants so
-            # there is one place to change them.
-            #
-            # All four are cumulative. The per-call ceiling is a separate
-            # question: `max_tokens_per_call` carries what `models.json`
-            # configures, and without it the loop would offer the whole
-            # remaining output budget to every single request.
             return run_task(
                 spec,
                 build_provider(config),
@@ -177,14 +138,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
 
 
 def main() -> None:
-    """Write a solution and return.
-
-    The exit code stays zero whenever a solution was written. An unsolved task
-    and a crashed program are different outcomes, and only the solution file can
-    tell them apart; exiting non-zero on an honest failure would collapse the
-    two for any caller that reads the status. A solution we could not write is
-    the one case worth a non-zero exit, because then there is nothing to read.
-    """
+    """Write a solution and return."""
     args = parse_args()
     solution = solve(args)
     try:

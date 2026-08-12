@@ -1,11 +1,3 @@
-"""The one repair attempt.
-
-The card asks for a single repair on a malformation, reported back to the model.
-Read "single" as "we do not loop with the LLM", not as "we try one substitution":
-each entry point walks a short ordered list of fixes and keeps the first that
-makes the text valid. From the caller's side that is one attempt, one note.
-"""
-
 import ast
 import re
 from collections.abc import Callable, Sequence
@@ -13,9 +5,6 @@ from collections.abc import Callable, Sequence
 from agent_smith.extraction.normalise import decode_json
 
 _Fix = tuple[str, Callable[[str], str]]
-
-# How far into a message we are willing to look for the start of the code. Past
-# this, the text is prose with a snippet in it, not code with a preamble.
 _MAX_PROSE_LINES = 5
 
 _FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL)
@@ -60,13 +49,7 @@ def _drop_trailing_commas(text: str) -> str:
 
 
 def _close_structures(text: str, quotes: tuple[str, ...]) -> str:
-    """Close an unterminated string and any still-open brackets, in one pass.
-
-    Both come from the same cause — a generation that stopped mid-way — and they
-    arrive together often enough that fixing them separately would leave the
-    common case unrepaired. A truncated `print("hello` needs its quote *and* its
-    parenthesis; either alone still will not parse.
-    """
+    """Close an unterminated string and any still-open brackets, in one pass."""
     stack: list[str] = []
     open_quote: str | None = None
     escaped = False
@@ -110,8 +93,6 @@ def _drop_leading_prose(code: str) -> str:
     lines = code.splitlines()
     for count in range(1, min(_MAX_PROSE_LINES, len(lines)) + 1):
         candidate = "\n".join(lines[count:])
-        # A blank candidate parses and says nothing. Dropping every line is not
-        # a repair, it is a way of turning a bad reply into an empty one.
         if candidate.strip() and _parses(candidate):
             return candidate
     return code
@@ -130,8 +111,6 @@ _JSON_FIXES: tuple[_Fix, ...] = (
     ("stripped a markdown fence wrapped around the JSON", _strip_fence),
     ("dropped a trailing comma", _drop_trailing_commas),
     ("closed an unterminated string or object", _close_json_structures),
-    # Last, so that the two notes above keep the cases they already describe on
-    # their own and this one is only reported when it is the accurate account.
     (
         "closed an unterminated string or object and dropped the trailing comma",
         _close_json_structures_after_a_comma,
