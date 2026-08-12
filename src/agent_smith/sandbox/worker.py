@@ -62,13 +62,7 @@ def _on_alarm(signum: int, frame: FrameType | None) -> NoReturn:
 
 
 def _make_tool_bridge(conn: WorkerConn) -> Callable[[str, dict[str, Any]], str]:
-    """Build the function the injected tool stubs call to reach the parent.
-
-    Waiting on the parent is not the sandboxed code running, so two things pause
-    for the round trip: the execution timer, because the subject says MCP server
-    work is not subject to the sandbox timeout; and the audit hook, because the
-    pipe traffic here is ours, not the model's.
-    """
+    """Build the function the injected tool stubs call to reach the parent."""
 
     def request(name: str, arguments: dict[str, Any]) -> str:
         remaining, _ = signal.setitimer(signal.ITIMER_REAL, 0)
@@ -115,17 +109,7 @@ def _build_namespace(
 
 @contextlib.contextmanager
 def _echoing_expressions() -> Iterator[None]:
-    """Show the value of a bare expression, the way a REPL does.
-
-    A tool returns its result instead of printing it, so `read_file("x")` on a
-    line of its own used to run, produce the file, and show the model nothing.
-    Telling it to wrap the call in `print()` works -- and costs an iteration
-    every time it forgets, which measurement put at three of one run's eight
-    turns.
-
-    `str` rather than the default hook's `repr`, because what comes back is
-    file contents and test output meant to be read, not re-parsed.
-    """
+    """Show the value of a bare expression, the way a REPL does."""
 
     def show(value: object) -> None:
         if value is not None:
@@ -159,9 +143,6 @@ def _execute_once(code: str, namespace: dict[str, Any], timeout: float) -> ExecR
             _echoing_expressions(),
             enforcement(),
         ):
-            # Parsed inside the try so a SyntaxError is reported like any other
-            # failure. `Interactive` is what turns a bare expression into an
-            # echo; every other statement compiles exactly as before.
             compiled = compile(
                 ast.Interactive(body=ast.parse(code).body), "<agent>", "single"
             )

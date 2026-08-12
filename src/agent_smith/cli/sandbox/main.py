@@ -1,15 +1,9 @@
 """The `sandbox` command line entry point.
 
-    uv run sandbox
-    uv run sandbox sandbox_template.json
-    uv run sandbox --mcp-stdio "python mcp_tools_mbpp.py" sandbox_template.json
-    uv run sandbox --mcp-server http://127.0.0.1:8000/mcp
-
-With no MCP transport the prompt offers `final_answer` and nothing else; with
-one, the server's tools are discovered at startup and appear in the namespace
-as plain Python functions. No API key is read and no model is contacted: this
-command is the sandbox on its own, which is what makes it useful for trying the
-restrictions by hand.
+uv run sandbox
+uv run sandbox sandbox_template.json
+uv run sandbox --mcp-stdio "python mcp_tools_mbpp.py" sandbox_template.json
+uv run sandbox --mcp-server http://127.0.0.1:8000/mcp
 """
 
 from __future__ import annotations
@@ -79,13 +73,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def load_config(path: Path | None) -> SandboxConfig:
-    """The limits for this session: the named file, or the contract's defaults.
-
-    An unnamed config is not an empty one. `SandboxConfig()` leaves both
-    allowlists empty and `Sandbox.from_config` reads that as "unset", falling
-    back to the defaults the subject lists -- which is what makes a bare
-    `uv run sandbox` a usable prompt rather than one that refuses every import.
-    """
+    """The limits for this session: the named file, or the contract's defaults."""
     if path is None:
         return SandboxConfig()
     return load_sandbox_config(path)
@@ -113,11 +101,6 @@ def build_client(args: argparse.Namespace) -> MCPClientProtocol | None:
         if not parts:
             raise ConfigError("--mcp-stdio needs a command to run")
         command, *arguments = parts
-        # The transport otherwise inherits six variables (HOME, PATH and four
-        # more) and drops the rest, which loses the one the SWE-bench server
-        # reads: `TESTBED_PATH=... sandbox --mcp-stdio '...'` is how a server
-        # is told where the repository is. This command line is the user's
-        # own, and so is the process it names.
         return UnifiedMCPClient(command=command, args=arguments, env=dict(os.environ))
 
     return UnifiedMCPClient(url=args.mcp_server)

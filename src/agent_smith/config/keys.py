@@ -1,41 +1,14 @@
-"""Provider identification and API key discovery.
-
-We do not control the `.env` we are handed at evaluation time, nor the names of
-the variables in it. So the provider is derived from `--provider-url` rather
-than hardcoded, and the keys are looked up under several conventions.
-
-Both functions are pure — the environment comes in as a mapping — which is what
-makes the whole key-resolution path testable without touching `os.environ`.
-"""
-
 import ipaddress
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from agent_smith.config.errors import ConfigError
 
-# An IP address or `localhost` names a machine, not a provider: there is nothing
-# to derive a prefix from, and the second-level rule would read "0" off
-# 127.0.0.1 — not even a legal variable name. Local inference servers (Ollama,
-# vLLM, llama.cpp) get this one instead, and the generic names still apply.
 _LOCAL_PREFIX = "LOCAL"
-
-# Overrides, not a support list: a host only belongs here when the fallback
-# below gets it wrong. `api.groq.com` and `openrouter.ai` already yield GROQ and
-# OPENROUTER on their own, so listing them would only suggest we endorse some
-# providers over others — the opposite of what this module is for. Google is
-# here because its endpoint lives on googleapis.com, which reads as GOOGLEAPIS.
-# Matched as a suffix, so subdomains resolve like their parent domain.
 _PREFIX_OVERRIDES: dict[str, str] = {
     "googleapis.com": "GOOGLE",
 }
-
-# Consulted only when nothing prefixed was found, most specific name first: a
-# bare `API_KEY` in a `.env` we did not write could belong to any service.
 _GENERIC_KEY_NAMES = ("LLM_API_KEY", "API_KEY")
-
-# The numbered scan tolerates holes, so it needs a bound rather than a stop
-# condition. Nobody carries thirty-two keys; this is only here to terminate.
 _MAX_NUMBERED_KEYS = 32
 
 

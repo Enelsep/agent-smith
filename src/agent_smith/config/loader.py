@@ -1,11 +1,3 @@
-"""Reading the JSON config files off disk.
-
-Every failure mode — absent file, bad JSON, wrong shape, misspelled key — comes
-back as a `ConfigError` naming the file, so a misconfiguration is readable at
-the point it happens instead of surfacing as an AttributeError three modules
-later.
-"""
-
 import json
 from pathlib import Path
 from typing import Any, TypeVar
@@ -59,14 +51,7 @@ def _validate(path: Path, data: Any, model: type[T]) -> T:
 
 
 def _reject_unknown_keys(path: Path, data: Any, model: type[BaseModel]) -> None:
-    """Fail on a key the model does not know, instead of dropping it.
-
-    `SandboxConfig` comes from the frozen contract, so we cannot give it
-    `extra="forbid"`, and all of its fields have defaults. Left alone, writing
-    `authorized_import` validates cleanly and hands back an empty allowlist —
-    every import refused at run time, with nothing to explain why. The check
-    lives here because the model is not ours to change.
-    """
+    """Fail on a key the model does not know, instead of dropping it."""
     if not isinstance(data, dict):
         return
 

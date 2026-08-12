@@ -1,11 +1,3 @@
-"""Holding the transcript flat, so a long task does not re-send its own past.
-
-The input-token ceiling is cumulative: every iteration re-sends the whole
-transcript, so a modest history sent seven times costs far more than the same
-history sent once. Older steps are kept for what they contribute causally —
-the code that ran and what it printed — and lose the reasoning that led there.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -27,15 +19,6 @@ def compact_history(
     messages: list[Message], *, verbatim_steps: int = 1
 ) -> list[Message]:
     """Shrink every step older than the verbatim window to its code.
-
-    `messages` arrives as `[system, task, assistant, observation, ...]`. The
-    two prompts and the last `verbatim_steps` steps pass through untouched;
-    older assistant turns keep `TRUNCATION_MARKER` and whatever code CORE-3
-    can still find in them, and their observations are kept whole because they
-    are small.
-
-    `verbatim_steps` is a parameter because the benchmarks do not share a
-    budget: MBPP allows 6 000 cumulative input tokens, SWE-bench 300 000.
 
     Never raises, and never mutates its argument. The returned list shares
     message objects with `messages` for the steps it keeps unchanged, so

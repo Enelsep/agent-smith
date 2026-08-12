@@ -1,6 +1,3 @@
-"""The single error type raised by the config package."""
-
-
 class ConfigError(Exception):
     """The runtime configuration could not be resolved.
 

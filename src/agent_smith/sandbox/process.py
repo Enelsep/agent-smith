@@ -87,10 +87,7 @@ class Sandbox:
         tool_handler: ToolHandler | None = None,
     ) -> Sandbox:
         """Build a sandbox from a `sandbox_template.json` already loaded.
-
-        The four limits live in the contract's `SandboxConfig`, so the JSON file
-        is the single source of truth; `config.loader.load_sandbox_config` reads
-        it. The class defaults below only apply when no config is supplied.
+        The class defaults below only apply when no config is supplied.
         """
         return cls(
             timeout=float(config.max_execution_time_seconds),

@@ -1,5 +1,3 @@
-"""One task, run as a Thought -> Code -> Observation cycle."""
-
 from __future__ import annotations
 
 import time
@@ -32,11 +30,7 @@ if TYPE_CHECKING:
 
 AnswerValidator = Callable[[str], str | None]
 """Judges a submission before the run is allowed to end on it.
-
-Given what `final_answer` was called with, it returns `None` to accept or the
-reason to refuse - addressed to the model, since that reason becomes the
-observation it reads next. Judging the answer here rather than in the prompt is
-what makes it hold whatever the model believes about its own work."""
+."""
 
 UNCHANGED_ANSWER = (
     "final_answer refused: this is the submission that was just refused, "
@@ -47,17 +41,6 @@ UNCHANGED_ANSWER = (
 
 def judged_once(validate: AnswerValidator) -> AnswerValidator:
     """Wrap a validator so an unchanged resubmission is refused unjudged.
-
-    A refusal the model acts on is the mechanism working: it reads what failed,
-    changes the code, submits again. A resubmission of the *identical* answer is
-    not — judging it again spends the task's clock to reach the answer already
-    given, and the trace it leaves reads as guessing against an oracle rather
-    than as fixing a bug.
-
-    One repeat is refused rather than the run ended: the iteration, token and
-    wall-clock guards already stop a task that goes nowhere, and a fourth
-    ceiling here would be a number to defend rather than a rule.
-
     Benchmark-agnostic, because the rule is about the answer and not about how
     it is judged: MBPP hands this an assertion run, SWE-bench a container one.
     """
@@ -74,26 +57,16 @@ def judged_once(validate: AnswerValidator) -> AnswerValidator:
     return once
 
 
-# The MBPP ceiling the moulinette enforces, and the stricter of the two it
-# knows: SWE-bench allows 30 and its CLI passes that. A caller who forgets
-# cannot silently invalidate a run.
 DEFAULT_MAX_ITERATIONS = 10
 
 DEFAULT_MAX_INPUT_TOKENS = 6000
-"""MBPP's cumulative input-token ceiling, the stricter of the two the
-subject enforces (SWE-bench allows 300 000). Same reasoning as
-DEFAULT_MAX_ITERATIONS: a caller that forgets to override it for
-SWE-bench cannot silently invalidate a run by undershooting.
-"""
+"""MBPP's cumulative input-token ceiling"""
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
 """MBPP's cumulative output-token ceiling (SWE-bench allows 10 000)."""
 
 DEFAULT_MAX_WALL_CLOCK_SECONDS = 120.0
-"""MBPP's wall-clock ceiling in seconds (SWE-bench allows 900). The 15%
-safety margin should_force_submission applies is computed from this
-value at call time, not baked into it.
-"""
+"""MBPP's wall-clock ceiling in seconds (SWE-bench allows 900)."""
 
 
 class Sandbox(Protocol):
@@ -125,33 +98,7 @@ def run_task(
     max_tokens_per_call: int | None = None,
     validate_answer: AnswerValidator | None = None,
 ) -> SolutionOutput:
-    """Run one task to a `SolutionOutput`. Never raises.
-
-    A crash scores as an automatic fail, so every failure path returns a valid
-    result with `success=False` and a populated `error` instead.
-
-    The sandbox is driven here but built and disposed of by the caller: that is
-    what lets a fake satisfy it, and it puts the `finally` that must survive a
-    signal at the process entry point rather than inside a library.
-
-    `max_tokens_per_call` is the per-request ceiling the operator configured —
-    `ResolvedConfig.max_tokens`, from `models.json`. The loop lowers it as the
-    cumulative output budget drains but never raises it, so a model configured
-    to answer in 400 tokens is not handed 1 500 on the first step. `None`
-    leaves the provider's own default in force.
-
-    `validate_answer` is given the last say on a submission: a run ends on
-    `final_answer` only if it returns `None`. Left out, any non-empty answer is
-    taken as given, which is what every caller had before there was anything to
-    check against.
-
-    The transcript sent to the provider is compacted by default, via
-    `compact_history` at its default `verbatim_steps`: older steps keep the
-    code that ran and lose the reasoning that led there, so a long task does
-    not pay to re-send its own past in full on every call. A caller with a
-    different budget passes its own callable, such as
-    `functools.partial(compact_history, verbatim_steps=N)`.
-    """
+    """Run one task to a `SolutionOutput`."""
     run = _Run(task, clock)
     try:
         run.execute(
@@ -192,10 +139,6 @@ class _Run:
         self.error: str | None = None
         self.total_input_tokens = 0
         self.total_output_tokens = 0
-        # What the guard needs to convert its estimates into the billed
-        # tokens the ceiling is denominated in, and to reserve the forced
-        # call at the size the transcript will have reached by then. Both
-        # are measured from the run itself rather than assumed.
         self._largest_growth: int | None = None
         self._last_estimate: int | None = None
         self._worst_ratio = 0.0
@@ -238,11 +181,6 @@ class _Run:
                     self._largest_growth or 0, estimated - self._last_estimate
                 )
             self._last_estimate = estimated
-            # A measured zero is an answer, not a missing one: a compaction
-            # that holds the transcript flat means the forced call really
-            # will be this size. Only the first iteration, which has nothing
-            # to compare against, needs a stand-in — and reserving a second
-            # copy of the view is the pessimistic one.
             growth = estimated if self._largest_growth is None else self._largest_growth
             reason = should_force_submission(
                 total_input_tokens=self.total_input_tokens,
@@ -269,22 +207,12 @@ class _Run:
                     )
                     return
                 if not can_attempt_submission(remaining_output):
-                    # Reported as an output_tokens stop whatever tripped the
-                    # guard: the label names the budget that blocked the
-                    # attempt, which is what a failure-category breakdown
-                    # needs to know.
                     self.error = (
                         f"stopped by the output_tokens budget guard before "
                         f"step {step}: {remaining_output} output tokens "
                         "remained, too few to attempt a final answer"
                     )
                     return
-                # Added to the view, not to the transcript: the nudge is about
-                # this call, and a forced turn may be followed by another one.
-                # Keeping it out of the history means it is never read back as
-                # part of the conversation, and it keeps `compact` to one call
-                # per iteration — CORE-7 need not be idempotent, nor preserve
-                # the last message it is handed.
                 view = [*view, {"role": "user", "content": FORCED_SUBMISSION_NUDGE}]
             try:
                 answer = provider.complete(
@@ -292,31 +220,20 @@ class _Run:
                     max_tokens=capped_max_tokens(max_tokens_per_call, remaining_output),
                 )
             except ProviderError as refused:
-                # CORE-2 has already retried across the key pool and spent its
-                # budget. Retrying here would stack two policies and burn the
-                # task's wall clock; the message is kept as it came.
                 self.error = str(refused)
                 return
-            # Calibration, from the one pairing that is never a guess: what
-            # this call was billed against what it was estimated at. Updated
-            # only once a call has been billed, so a refusal cannot deflate it.
             self._worst_ratio = max(
                 self._worst_ratio, billing_ratio(answer.input_tokens, estimated)
             )
             self.history.append({"role": "assistant", "content": answer.text})
             extracted = extract_code(answer.text, step=step)
             if extracted.code is None:
-                # Nothing ran, so both sandbox fields stay empty: `StepMetrics`
-                # documents that as correct for a step with no execution.
                 said = observation.from_extraction(extracted)
                 self._record(step, answer, sandbox_input="", sandbox_output="")
             else:
                 before = sandbox.restarts
                 executed = sandbox.execute(extracted.code)
                 if executed.outcome is Outcome.FINAL_ANSWER and executed.final_answer:
-                    # Held before the judging, not after: validating runs code,
-                    # and code that takes the sandbox down with it must not take
-                    # the answer too.
                     self.solution = executed.final_answer
                     rejection = (
                         None
@@ -332,17 +249,8 @@ class _Run:
                             observation.combined_output(executed),
                         )
                         return
-                    # A submission that does not survive its own tests is not
-                    # an answer, and the run has budget left to say so. The
-                    # reason takes the place of the observation, which is what
-                    # gives the next turn something to act on.
-                    # The answer stays where it was put, without the success it
-                    # did not earn: if the run ends before a submission passes,
-                    # a refused attempt is worth more than an empty string.
                     said = rejection
                     if sandbox.restarts != before:
-                        # Validating can cost the worker, and the model would
-                        # otherwise keep referring to a namespace it has lost.
                         said = f"{said}\n\n{observation.NAMESPACE_LOST}"
                 else:
                     said = observation.from_execution(
@@ -352,29 +260,13 @@ class _Run:
                     )
                 self._record(step, answer, extracted.code, said)
             if answer.cut_short:
-                # Whatever the step ended as, the reply that produced it stopped
-                # at the cap rather than where the model meant. Added after the
-                # step is recorded: the sandbox did not say this, the endpoint
-                # did, and `sandbox_output` is the sandbox's own account.
                 said = f"{said}\n\n{feedback.reply_cut_short()}"
             if reason == "wall_clock":
-                # The one budget that cannot be reserved against. `can_afford_
-                # forced_call` and `can_attempt_submission` let a token stop be
-                # retried because both are measurable before the call; how long
-                # a request will take is not knowable until it returns, so a
-                # second attempt here is a bet against the only ceiling with no
-                # way to check it first.
                 self.error = (
                     f"stopped by the wall_clock budget guard at step {step}; "
                     "no final answer was received"
                 )
                 return
-            # A forced turn that answered nothing usable is not the end of a
-            # run stopped for tokens: the observation about to be appended is
-            # what would fix the next attempt — a block that did not parse says
-            # so — and the two affordability checks at the top of the next
-            # iteration decide whether there is budget left to try again.
-            # Returning here would discard both while the ceiling still had room.
             self.history.append({"role": "user", "content": said})
         self.error = (
             f"the agent used all {max_iterations} iterations without calling "
