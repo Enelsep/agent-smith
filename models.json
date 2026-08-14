@@ -7,6 +7,14 @@
         "llama-3.3-70b-versatile": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
+        },
+        "llama-3.1-8b-instant": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        },
+        "qwen/qwen3.6-27b": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
         }
       }
     },
@@ -44,7 +52,27 @@
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
         },
-        "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "nvidia/nemotron-nano-9b-v2:free": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        }
+      }
+    },
+    "google": {
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "default_model": "gemini-3.1-flash-lite",
+      "models": {
+        "gemini-3.1-flash-lite": {
+          "stop": ["<end_code>", "</tool_call>", "Observation:"],
+          "max_tokens": 1500
+        }
+      }
+    },
+    "poolside": {
+      "base_url": "https://inference.poolside.ai/v1",
+      "default_model": "poolside/laguna-s-2.1:free",
+      "models": {
+        "poolside/laguna-s-2.1:free": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
         }
