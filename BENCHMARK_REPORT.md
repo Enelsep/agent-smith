@@ -201,6 +201,49 @@ verdict and the list of failing ids.
 
 ## 3. Provider reliability
 
+Computed from the `steps[]` of the 77 solution files under `benchmarks/runs/`, one
+row per model actually put through the matrix. **Avg response time** is the mean of
+`request_time_ms` over every request the model made — the endpoint's own latency, not
+the wall-clock of a task, which also contains sandbox execution and tool calls.
+**Retries** counts every re-attempt the provider forced, summed over those requests.
+**Availability** is the share of the 7 task runs not lost to a provider-side failure:
+a rate-limit lockout, an empty completion, or an HTTP 413. Runs lost to a ceiling, to
+non-convergence, or to our own container timeout are not counted against the provider.
+
+| Provider | Model | Requests | Avg response time / request | Retries | Availability |
+|---|---|---|---|---|---|
+| Mistral | `codestral-2508` | 75 | 0.80 s | 0 | 7/7 (100%) |
+| Mistral | `magistral-small-latest` | 80 | 0.88 s | 85 | 7/7 (100%) |
+| Mistral | `mistral-medium-latest` | 69 | 2.27 s | 263 | 7/7 (100%) |
+| Mistral | `devstral-medium-latest` | 74 | 7.44 s | 12 | 6/7 (86%) |
+| Groq | `qwen/qwen3.6-27b` | 43 | 0.64 s | 75 | 7/7 (100%) |
+| Groq | `llama-3.3-70b-versatile` | 32 | 0.36 s | 26 | 6/7 (86%) |
+| Groq | `llama-3.1-8b-instant` | 112 | 0.33 s | 212 | 3/7 (43%) |
+| OpenRouter | `qwen/qwen3-235b-a22b-2507` | 59 | 2.50 s | 0 | 7/7 (100%) |
+| OpenRouter | `nvidia/nemotron-nano-9b-v2:free` | 6 | 20.67 s | 0 | 2/7 (29%) |
+| Google | `gemini-3.1-flash-lite` | 86 | 3.53 s | 4 | 6/7 (86%) |
+| Google | `gemini-3.6-flash` | 20 | 4.30 s | 34 | 0/7 (0%) |
+| Poolside | `poolside/laguna-s-2.1` | 149 | 3.13 s | 1 | 7/7 (100%) |
+
+**Retries do not predict availability, and that is the retry budget working.**
+`mistral-medium-latest` was throttled harder than anything else in the table — 263
+retries against 69 requests, close to four re-attempts per call — and still finished
+7/7 with nothing lost. `codestral-2508` needed none and finished the same. What the
+retry loop buys is the conversion of a provider's throttling into latency instead of
+failure, which is exactly what §5.3 measures when the attempt ceiling is put back.
+
+**Speed does not predict availability either.** The two fastest models per request in
+the whole matrix are Groq's llamas at 0.33 s and 0.36 s, and they are also the two
+least available on that provider — 43% and 86%. `llama-3.1-8b-instant` answers
+quickly and refuses the payload: its 212 retries and 112 requests are the shape of a
+model being asked, repeatedly, for something its context window cannot hold.
+
+**A low request count is itself a reliability signal.** `nvidia/nemotron-nano-9b-v2:free`
+made 6 requests across 7 tasks, at 20.67 s each, because five of those tasks ended on
+an empty completion before a second turn was possible; `gemini-3.6-flash` made 20 and
+never recovered from its first lockout. Neither number describes a model that was
+given a fair chance to be slow — it describes one that stopped answering.
+
 | Provider | Models tested | What broke, concretely |
 |---|---|---|
 | **Mistral** | mistral-medium, magistral-small, codestral, devstral | Single API key hit the per-second free-tier limit hard on `mistral-medium-latest`/`sympy-14711` earlier in this project (100 retries measured); `devstral-medium-latest` returned an outright empty completion once on `scikit-learn-13439`. Otherwise stable. |
