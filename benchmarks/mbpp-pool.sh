@@ -17,11 +17,14 @@ MODEL=${MODEL:-codestral-2508}
 SLUG=$(echo "$MODEL" | tr '/' '-')
 mkdir -p "$OUT/tasks" "$OUT/$SLUG"
 
-# The pool the moulinette dumps from, so the set matches what the exam draws.
-IDS=${IDS:-$(cd moulinette && uv run python -c "
-from moulinette.mbpp import InteractMBPP
-print(' '.join(str(i) for i in InteractMBPP().list_tasks(split='test')))
-" 2>/dev/null)}
+# The pool is whatever task dumps sit under $OUT/tasks. The 257 of the MBPP test
+# split are committed there, so a re-run needs nothing else; any other set is
+# passed in as IDS= and dumped below.
+IDS=${IDS:-$(ls "$OUT/tasks" 2>/dev/null | sed 's/\.json$//' | sort -n | tr '\n' ' ')}
+if [ -z "${IDS// /}" ]; then
+  echo "no task dumps under $OUT/tasks, and no IDS= given" >&2
+  exit 1
+fi
 
 for id in $IDS; do
   T="$OUT/tasks/$id.json"
