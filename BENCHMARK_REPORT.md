@@ -482,11 +482,13 @@ The most expensive thing that happened during this project was not a large token
 
 ## 9. Conclusions
 
-**Recommended default for SWE-bench: `qwen/qwen3.6-27b` (Groq).** The only model in the 11-way comparison with a perfect 7/7, including the one task (`scikit-learn-13779`) that stumped every OpenRouter and most Mistral models. Its raw efficiency is not the best in the pool (see §8.2), but efficiency-on-a-hard-ceiling — solving the tasks other models time out on — is what a 30-iteration/300k-token exam ceiling actually rewards.
+**Three models tie at the top: `mistral-medium-latest`, `magistral-small-latest` and `qwen/qwen3.6-27b` all solve 7/7.** Capability does not separate them, so the choice is made on what does: cost and provider resilience.
 
-**Strong second choice, different provider: `qwen/qwen3-235b-a22b-2507` (OpenRouter) or `magistral-small-latest` (Mistral).** Both 6-7/7, both efficient on what they solve. Keeping one of these configured as a fallback protects against the Groq-specific failure modes observed here (`llama-3.1-8b-instant`'s HTTP 413s, `llama-3.3-70b-versatile`'s one lockout) without adding a fourth provider to manage day-to-day.
+**Recommended default for SWE-bench: `magistral-small-latest` (Mistral).** It is the fastest of the three end to end (388s against 602s and 947s), and §3 measures it at 100% availability with 85 retries absorbed into latency rather than failure. What decides it is the shape of the quota behind it: Mistral gives us two keys against a limit expressed per second, so throttling arrives as delay the retry budget can spend. Our Groq access is one key against a cap expressed per day — a wall that returns nothing rather than returning late, and that a single benchmark campaign is enough to reach.
 
-**`mistral-medium-latest` and `magistral-small-latest` remain solid, single-provider-risk options.** Both 7/7, both already configured in `models.json`. Their exposure is entirely captured in §3 and §8.3: fine as long as the single Mistral key isn't simultaneously serving a second benchmark run.
+**`qwen/qwen3.6-27b` (Groq) is the strong alternative, and by far the cheapest.** 7/7 on 101,022 input tokens, a fifth of what `magistral-small-latest` spends for the same score, and the lowest per-task peak in the matrix. A second Groq key on a separate account would remove the objection above and make it the better choice on the numbers.
+
+**`mistral-medium-latest` stays configured, on MBPP.** 7/7 here too, but §2.3 shows it reaching 235,537 input tokens on a single task against a 300,000 ceiling, the narrowest margin of the three; §2.4 is where it earns its place instead.
 
 **Deprioritise on capability grounds: `codestral-2508`, `llama-3.3-70b-versatile`.** Both 5/7, but the failures cluster on the harder tasks (`sympy-14711`, `scikit-learn-13779`) rather than on infrastructure — `codestral-2508` never once needed a retry and still failed to converge twice.
 
