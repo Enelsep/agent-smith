@@ -35,7 +35,7 @@ Two additional models were tried and **discarded before completing a full run** 
 | 6 | `scikit-learn__scikit-learn-13439` | `moulinette`'s `EXAM_POOL` | `<15 min fix` |
 | 7 | `scikit-learn__scikit-learn-13779` | `moulinette.list_instances(exclude_exam_pool=True)`, same difficulty tier | `<15 min fix` |
 
-Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `solution.json` files live at `benchmarks/runs/<model-slug>/<task_id>.json`, produced by `benchmarks/swe-matrix.sh`; per-model summaries are duplicated at `models_pool/<model-slug>.md` for quick reading.
+Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `solution.json` files live at `benchmarks/runs/<model-slug>/<task_id>.json`, produced by `benchmarks/swe-matrix.sh`.
 
 ## 2. Results
 
@@ -466,7 +466,7 @@ The most expensive thing that happened during this project was not a large token
 - **Task IDs**: the 7 listed in §1, all `SWE-bench_Verified` instances resolved via `moulinette.dump swebench --task_id <id>`.
 - **Model IDs and endpoints**: exact strings and `base_url`s are in `models.json` at the repository root; the ones tested here are listed verbatim in §1's table.
 - **Command**: each cell in §2.3 is one `uv run python -m agent_swebench --task-file benchmarks/runs/tasks/<task>.json --output benchmarks/runs/<model-slug>/<task>.json --env-file .env --provider-url <url> --model-name <model>` invocation, orchestrated by `benchmarks/swe-matrix.sh` (resumable: re-running the same `TASKS`/`MODELS` combination skips any cell whose output file already exists).
-- **Raw data**: every cell's full `solution.json` (per-step `llm_output`, `sandbox_input`, `sandbox_output`, token counts, timestamps) is under `benchmarks/runs/<model-slug>/<task>.json`; per-model rollups are duplicated at `models_pool/<model-slug>.md`.
+- **Raw data**: every cell's full `solution.json` (per-step `llm_output`, `sandbox_input`, `sandbox_output`, token counts, timestamps) is under `benchmarks/runs/<model-slug>/<task>.json`.
 - **When this was collected**: 2026-08-13/14. This matters more than usual for this report: model catalogues and free-tier quotas are explicitly *not* stable over time (the subject itself warns of this, p.29) — two Google Pro models were unusable on this account on this date for billing reasons that could change, and the OpenRouter cap reset is tied to a wall-clock day boundary, so re-running this exact matrix on a different day can legitimately produce different availability, independent of any code change.
 - **Environment**: Python 3.10, `uv`-managed, single API key per provider except where noted (Mistral, Google, Groq, Poolside all ran on one key each; OpenRouter likewise).
 
