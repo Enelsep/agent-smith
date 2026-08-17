@@ -4,7 +4,7 @@ FIXTURES_DIR = tests/fixtures
 
 .PHONY: install run clean lint test check dev-mbpp dev-swe
 
-source $(VENV_DIR)/bin/activate:
+$(VENV_DIR)/bin/activate:
 	@echo "Creating virtual environment..."
 	uv venv $(VENV_DIR)
 

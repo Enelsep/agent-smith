@@ -14,14 +14,17 @@ MAX_OUTPUT_CHARS = 10000
 def run_command(
     command: str,
     workdir: str = ".",
-    timeout: int = 30,
+    timeout: int = 120,
 ) -> str:
     """Executes a shell command in the specified directory.
 
     Args:
         command: Shell command string to execute.
         workdir: Working directory for execution (default: '.').
-        timeout: Maximum execution timeout in seconds (default: 30).
+        timeout: Maximum execution timeout in seconds (default: 120). Long
+            enough for the `pip install` and single-file `pytest` a model
+            reaches for, short enough that a command that never returns costs
+            a fraction of the run's wall-clock budget rather than most of it.
 
     Returns:
         Formatted string containing exit code, stdout, stderr, and truncation notice if needed.

@@ -118,10 +118,7 @@ def solve(args: argparse.Namespace) -> SolutionOutput:
 
     spec = build_task_spec(task, build_system_prompt(config.sandbox.authorized_imports))
     try:
-        with Sandbox(
-            timeout=config.sandbox.max_execution_time_seconds,
-            authorized_imports=config.sandbox.authorized_imports,
-        ) as sandbox:
+        with Sandbox.from_config(config.sandbox) as sandbox:
             return run_task(
                 spec,
                 build_provider(config),

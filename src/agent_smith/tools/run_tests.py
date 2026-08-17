@@ -18,14 +18,17 @@ that this module is free to reword. `cli.swebench` refuses a submission on it.""
 def run_tests(
     eval_script: str = "pytest",
     directory: str = ".",
-    timeout: int = 60,
+    timeout: int = 600,
 ) -> str:
     """Executes a test evaluation script and parses the output into structured test metrics.
 
     Args:
         eval_script: Command or script path to run tests (default: 'pytest').
         directory: Root directory in which to run tests (default: '.').
-        timeout: Maximum execution time in seconds (default: 60).
+        timeout: Maximum execution time in seconds (default: 600). The caller
+            reached through MCP cannot pass one, and the submission validator
+            reads this output for a PASSED verdict, so the default has to
+            outlast a real repository suite rather than a unit test.
 
     Returns:
         Formatted summary string with passed/failed counts, failing test names,
