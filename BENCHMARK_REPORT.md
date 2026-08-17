@@ -146,42 +146,55 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 The matrix above is SWE-bench only. MBPP was measured separately, over the whole
 257-task `test` split rather than a sample, under the subject's MBPP ceilings
 (10 iterations, 6 000 input tokens, 1 500 output tokens, 120 s per task). Three
-Mistral models, one pass each, same commit:
+Mistral models, one pass each, same commit, scored with
+`moulinette_eval validate mbpp`:
 
-| Model | Passing | Stopped by a budget guard | Input tokens | Output tokens | s/task |
-|---|---|---|---|---|---|
-| `mistral-medium-latest` | **238 / 257** | 10 | 463,164 | 78,271 | 3.4 |
-| `magistral-small-latest` | 215 / 257 | 35 | 609,918 | 84,823 | 3.2 |
-| `codestral-2508` | 207 / 257 | 41 | 557,553 | 68,927 | 3.3 |
+| Model | Passing | Ran out of budget | Submitted a wrong answer | Input tokens | Output tokens | s/task |
+|---|---|---|---|---|---|---|
+| `mistral-medium-latest` | **238 / 257** | 10 | 9 | 463,164 | 78,271 | 3.4 |
+| `magistral-small-latest` | 215 / 257 | 35 | 7 | 609,918 | 84,823 | 3.2 |
+| `codestral-2508` | 207 / 257 | 41 | 9 | 557,553 | 68,927 | 3.3 |
 
-`mistral-medium-latest` is ahead on every axis at once, and the failure sets say
-the gap is structural rather than a lucky pass: 16 tasks defeat all three, and
-**no task fails for `mistral-medium-latest` alone**, against 13 for
-`magistral-small-latest` and 20 for `codestral-2508`. Its 19 failures are a
-subset of what the other two already miss.
+**Those two failure columns are exhaustive — there is no third kind.** Every
+task that does not pass either exhausted a ceiling before submitting anything,
+or submitted an answer that satisfied the assertions the task ships and failed
+the ones it does not. Checked per task on all three passes, the second column is
+*exactly* the set of runs the harness reported as successful and the validation
+refused. Nothing is ever submitted that fails a test the agent could see: the
+refusal loop holds, and what leaks past it is only ever invisible to it.
 
-**The ceiling decides more than the model does.** Budget-guard exits track the
-score almost exactly — 10 exits for 238 passes, 35 for 215, 41 for 207 — and
-nearly all of them are the 6 000-token input ceiling reached before the run
-converges, not a wrong answer submitted and refused. Across all three passes the
-binding constraint on MBPP is how much transcript a task costs, so the headroom
-left in this harness is in `agent/history.py`'s compaction, not in the model
-list. That is the opposite of the SWE-bench picture in §5, where prompt and tool
-design moved the score.
+**Which means the ceiling decides, not the model.** Wrong answers are 9, 7 and 9
+— indistinguishable across three models spanning 31 points of score. What
+separates them is entirely the first column: 10 budget exits against 35 and 41.
+`magistral-small-latest` submits *fewer* wrong answers than
+`mistral-medium-latest` and still finishes 23 tasks behind it, because it spends
+its 6 000-token input allowance three and a half times more often before
+converging. On this benchmark the models differ in concision, not in
+correctness, and the headroom left in this harness is in `agent/history.py`'s
+compaction rather than in the model list. That is the opposite of the SWE-bench
+picture in §5, where prompt and tool design moved the score.
 
-**These scores come from `moulinette_eval validate mbpp`, not from the `success`
-field of the solution files, and the two disagree.** A task dump carries only the
-public assertions, so the harness validates a submission against a subset of what
-finally judges it: the agents claimed 247, 222 and 216 successes where 238, 215
-and 207 hold up — 9, 7 and 9 false positives, a consistent ~3 % overstatement
-that is a property of the public subset rather than of any model. Task 20 is the
-clean case. Both assertions it ships are negative (`is_woodall(254) == False`,
+**Read these scores with their run-to-run range.** A budget exit is a function of
+how much transcript accumulated before convergence, so it moves with provider
+latency and throttling on the day. The 10 exits in the `mistral-medium-latest`
+pass are the measurement's own error bar: the same model and the same commit can
+land anywhere from 238 to 248 depending on nothing but the weather at the
+endpoint. The 9 wrong answers are the part that does not move. Any single number
+in the table above is a draw from that range, not a constant — which is also why
+a 5-task comparison cannot rank two models whose ranges overlap.
+
+**None of these figures is a `success` count.** A task dump carries only the
+public assertions, so the harness validates against a subset of what finally
+judges it, and the gap is the second failure column: the agents claimed 247, 222
+and 216 successes where 238, 215 and 207 hold up. Task 20 is the clean case.
+Both assertions it ships are negative (`is_woodall(254) == False`,
 `is_woodall(200) == False`), so a solution computing `k * (2**k - 1)` instead of
-Woodall's `k * 2**k - 1` satisfies everything it was given and still fails. No
-MBPP figure anywhere in this report is a `success` count.
+Woodall's `k * 2**k - 1` satisfies everything it was given and still fails.
 
 `mistral-medium-latest` is what `models.json` configures under
-`benchmark_defaults.mbpp`. Backing files: the 771 solution files under
+`benchmark_defaults.mbpp`; `magistral-small-latest` stays on SWE-bench, where §2
+measures it at 7/7. The two benchmarks wanting different models is the reason
+that key exists. Backing files: the 771 solution files under
 `benchmarks/mbpp/<model>/`, the 257 task dumps under `benchmarks/mbpp/tasks/`,
 and one `benchmarks/mbpp/<model>-validation.txt` per pass carrying the per-task
 verdict and the list of failing ids.
