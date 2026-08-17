@@ -64,6 +64,38 @@ uv run moulinette_eval dump swebench --task_id sympy__sympy-13480 --output /abs/
 uv run moulinette_eval validate swebench task.json solution.json
 ```
 
+**On rootless Docker with a high host UID, `validate swebench` needs a one-line patch first.**
+School accounts sit well above the subuid range rootless Docker maps (typically 0–65536), and
+`moulinette/swebench/interact.py`'s `eval()` reaches `copy_to_container` twice — once for the
+patch, once for `eval.sh`. That helper tars the file preserving the host UID, so extraction
+inside the container calls `lchown(..., 102483, ...)`, gets `EINVAL`, and the validation fails
+*before the patch is applied*. The result is a false negative that looks like a wrong answer:
+
+```
+failed to Lchown "/tmp/patch.diff" for UID 102483, GID 4225: invalid argument
+```
+
+Check with `id`, `docker info | grep -i rootless`, and `grep "$(whoami)" /etc/subuid`. The fix
+is in the moulinette's own `.venv`, in `swebench/harness/docker_utils.py`, forcing every tar
+entry to root:
+
+```python
+def _root(ti):
+    ti.uid = ti.gid = 0
+    ti.uname = ti.gname = "root"
+    return ti
+
+
+tar.add(src, arcname=dst.name, filter=_root)
+```
+
+That `.venv` is not tracked, so the patch has to be reapplied after every `uv sync`. Diagnosis
+and fix from [JulesMattioni/agent_smith](https://github.com/JulesMattioni/agent_smith/blob/main/docs/bug-moulinette-docker-rootless.md).
+
+This is a scoring-side problem only. The agent itself never copies into a container: it
+declares read-only bind mounts at `docker run` and speaks over `docker exec -i`, so nothing it
+does goes through the failing path.
+
 **Run a benchmark campaign** — the model × task matrix, resumable, one image resident at a time:
 
 ```bash
