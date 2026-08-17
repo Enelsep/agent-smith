@@ -1,0 +1,68 @@
+{
+  "task_id": "pydata__xarray-4629",
+  "benchmark": "swebench",
+  "success": true,
+  "solution": "diff --git a/xarray/core/merge.py b/xarray/core/merge.py\nindex ca4e29b6..dff00804 100644\n--- a/xarray/core/merge.py\n+++ b/xarray/core/merge.py\n@@ -501,7 +501,7 @@ def merge_attrs(variable_attrs, combine_attrs):\n     if combine_attrs == \"drop\":\n         return {}\n     elif combine_attrs == \"override\":\n-        return variable_attrs[0]\n+        return dict(variable_attrs[0])\n     elif combine_attrs == \"no_conflicts\":\n         result = dict(variable_attrs[0])\n         for attrs in variable_attrs[1:]:",
+  "iterations": 4,
+  "total_requests": 7,
+  "total_input_tokens": 8356,
+  "total_output_tokens": 402,
+  "total_time_seconds": 21.082479589000286,
+  "steps": [
+    {
+      "step": 1,
+      "input_tokens": 1695,
+      "output_tokens": 145,
+      "request_time_ms": 544.3778739972913,
+      "timestamp": "2026-08-13T15:10:39.573864",
+      "api_url": "https://api.groq.com/openai/v1/chat/completions",
+      "model_name": "qwen/qwen3.6-27b",
+      "llm_output": "\n<think>\nThe user is reporting a bug in xarray where `merge(combine_attrs='override')` doesn't copy attrs but instead references attrs from the first object. The issue is in the `merge.py` file around line 504 where `return variable_attrs[0]` should be `return dict(variable_attrs[0])` to create a copy instead of a reference.\n\nLet me start by reading the relevant file to understand the code structure.\n</think>\n\n```python\n# Read the merge.py file around line 504 to see the issue\nprint(read_file(\"/testbed/xarray/core/merge.py\", start_line=490, end_line=520))\n```",
+      "sandbox_input": "# Read the merge.py file around line 504 to see the issue\nprint(read_file(\"/testbed/xarray/core/merge.py\", start_line=490, end_line=520))",
+      "sandbox_output": "490:                 \"not a 1D variable along that dimension. This is disallowed \"\n491:                 \"by the xarray data model.\" % coord_name\n492:             )\n493: \n494: \n495: def merge_attrs(variable_attrs, combine_attrs):\n496:     \"\"\"Combine attributes from different variables according to combine_attrs\"\"\"\n497:     if not variable_attrs:\n498:         # no attributes to merge\n499:         return None\n500: \n501:     if combine_attrs == \"drop\":\n502:         return {}\n503:     elif combine_attrs == \"override\":\n504:         return variable_attrs[0]\n505:     elif combine_attrs == \"no_conflicts\":\n506:         result = dict(variable_attrs[0])\n507:         for attrs in variable_attrs[1:]:\n508:             try:\n509:                 result = compat_dict_union(result, attrs)\n510:             except ValueError:\n511:                 raise MergeError(\n512:                     \"combine_attrs='no_conflicts', but some values are not \"\n513:                     \"the same. Merging %s with %s\" % (str(result), str(attrs))\n514:                 )\n515:         return result\n516:     elif combine_attrs == \"identical\":\n517:         result = dict(variable_attrs[0])\n518:         for attrs in variable_attrs[1:]:\n519:             if not dict_equiv(result, attrs):\n520:                 raise MergeError(",
+      "retries": 0
+    },
+    {
+      "step": 2,
+      "input_tokens": 2135,
+      "output_tokens": 160,
+      "request_time_ms": 660.454030999972,
+      "timestamp": "2026-08-13T15:10:40.281031",
+      "api_url": "https://api.groq.com/openai/v1/chat/completions",
+      "model_name": "qwen/qwen3.6-27b",
+      "llm_output": "\n<think>\nThe issue is clear: on line 504, when `combine_attrs == \"override\"`, it returns `variable_attrs[0]` directly without making a copy. This means the returned attrs dict references the same object as the first source's attrs. The fix is to change it to `return dict(variable_attrs[0])` to create a shallow copy.\n\nLet me make this fix.\n</think>\n\n```python\n# Fix the issue by making a copy of the attrs dict for \"override\" case\nprint(edit_file(\"/testbed/xarray/core/merge.py\", \"    elif combine_attrs == \\\"override\\\":\\n        return variable_attrs[0]\", \"    elif combine_attrs == \\\"override\\\":\\n        return dict(variable_attrs[0])\"))\n```",
+      "sandbox_input": "# Fix the issue by making a copy of the attrs dict for \"override\" case\nprint(edit_file(\"/testbed/xarray/core/merge.py\", \"    elif combine_attrs == \\\"override\\\":\\n        return variable_attrs[0]\", \"    elif combine_attrs == \\\"override\\\":\\n        return dict(variable_attrs[0])\"))",
+      "sandbox_output": "Successfully updated '/testbed/xarray/core/merge.py'.",
+      "retries": 1
+    },
+    {
+      "step": 3,
+      "input_tokens": 2238,
+      "output_tokens": 31,
+      "request_time_ms": 364.5459630024561,
+      "timestamp": "2026-08-13T15:10:43.993726",
+      "api_url": "https://api.groq.com/openai/v1/chat/completions",
+      "model_name": "qwen/qwen3.6-27b",
+      "llm_output": "\n<think>\nThe edit was successful. Now I should run the tests to verify the fix works correctly.\n</think>\n\n```python\nprint(run_tests())\n```",
+      "sandbox_input": "print(run_tests())",
+      "sandbox_output": "Test Run Status: PASSED (Exit code: 0)\nSummary: 33 passed, 0 failed",
+      "retries": 0
+    },
+    {
+      "step": 4,
+      "input_tokens": 2288,
+      "output_tokens": 66,
+      "request_time_ms": 467.84791099707945,
+      "timestamp": "2026-08-13T15:11:00.110086",
+      "api_url": "https://api.groq.com/openai/v1/chat/completions",
+      "model_name": "qwen/qwen3.6-27b",
+      "llm_output": "\n<think>\nThe tests passed. The fix was simple - changing `return variable_attrs[0]` to `return dict(variable_attrs[0])` in the \"override\" case of the `merge_attrs` function. Now I should call final_answer with the patch.\n</think>\n\n```python\nfinal_answer(get_patch())\n```",
+      "sandbox_input": "final_answer(get_patch())",
+      "sandbox_output": "",
+      "retries": 2
+    }
+  ],
+  "system_prompt": "<!-- Carries the turn contract and the tool list, and nothing beyond what a\n     run has shown to be needed. Every added line is re-sent on every turn,\n     so a resolution method earns its place from a failure trace or not at\n     all. -->\n\nYou are an autonomous coding agent working inside a checked-out repository. You\nfix one issue by reading code, editing files, running the tests, and iterating.\n\nEach turn is exactly one fenced Python block and nothing else:\n\n```python\n# One short comment on what you are trying, if it helps.\nprint(read_file(\"path/to/file.py\", start_line=1, end_line=40))\n```<end_code>\n\nWrite no prose before the block and none after it. Then STOP: do not write an\nObservation. The real execution result is given to you in the next message.\n\nBe brief. A turn that spends its tokens on reasoning is cut off before its code\nand achieves nothing.\n\n## Tools\n\nAvailable in the sandbox namespace as ordinary Python functions. Each returns a string rather than printing it: wrap the call in print() to read the result. They run outside the sandbox, so its import and file restrictions do not apply to their work.\n\n- `read_file(filepath: str, start_line: int = None, end_line: int = None)` - Read file contents with optional start and end line ranges.\n- `edit_file(filepath: str, old_str: str, new_str: str)` - Replace precise occurrences of text within a file.\n- `list_files(directory: str = None, pattern: str = None)` - List files in a directory matching an optional fnmatch pattern.\n- `search_code(pattern: str, file_pattern: str = None)` - Search code using regex pattern matching.\n- `search_code_with_context(pattern: str, file_pattern: str = None, context_lines: int = None)` - Search code and return each match with the lines around it, in one call.\n- `write_file(filepath: str, content: str)` - Create or overwrite a file with the given content.\n- `search_function_or_class_definition_in_code(name: str)` - Locate class or function definitions by name.\n- `find_references(name: str, filepath: str = None, line: int = None)` - Find symbol references across the repository.\n- `run_tests(eval_script: str = None, directory: str = None)` - Run the task's own evaluation script and report what the tests did. Takes no arguments: the script is already...\n- `get_patch(directory: str = None)` - Generate git diff patch for uncommitted changes.\n- `run_command(command: str, workdir: str = None)` - Execute arbitrary shell command in testbed workspace.\n\nReach for `search_code_with_context` before `search_code`: it returns the\nmatching line and the lines around it in one call, where the pair of them costs\ntwo turns. Every turn re-sends the whole transcript against a cumulative\nceiling, so a turn saved is budget saved.\n\nfinal_answer(get_patch()) ends the task. Call it once the tests you were given\npass; the patch it carries is the answer you are judged on.\n\nget_patch() on its own does not end anything - it hands you the diff as an\nobservation and the task keeps going. final_answer is not one of the tools\nabove: the sandbox provides it in the namespace whatever server is connected.\n",
+  "error": null,
+  "timestamp": "2026-08-13T15:11:00.110111"
+}

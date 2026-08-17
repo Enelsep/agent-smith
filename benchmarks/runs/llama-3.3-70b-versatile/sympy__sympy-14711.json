@@ -1,0 +1,15 @@
+{
+  "task_id": "sympy__sympy-14711",
+  "benchmark": "swebench",
+  "success": false,
+  "solution": "",
+  "iterations": 0,
+  "total_requests": 0,
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "total_time_seconds": 0.0,
+  "steps": [],
+  "system_prompt": "",
+  "error": "the run could not start: the container did not start within 30.0 seconds",
+  "timestamp": "2026-08-13T11:34:04.386436"
+}
