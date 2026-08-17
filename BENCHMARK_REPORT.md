@@ -23,7 +23,7 @@ Two additional models were tried and **discarded before completing a full run** 
 - **`gemini-3.6-flash`** (Google): 0/7. The very first task burned 20 iterations before the single API key got rate-limited; every task after that failed instantly (0 iterations, ~148s each) because the key never recovered within the session. This is a provider-side lockout, not a capability failure — see §3.
 - **`gemma-4-31b-it`** (Google): abandoned mid-run. Its responses embed a `<thought>...</thought>` reasoning trace directly inside the completion content (the same failure family documented in §6.1), and the one task it was given took over 6 minutes without finishing — pulled before it produced usable data.
 
-**Tasks** (7, the pool documented in `Q14_TASK_POOL.md`):
+**Tasks** (7, each with the reason it was picked):
 
 | # | Task | Source | Difficulty |
 |---|---|---|---|
@@ -325,7 +325,7 @@ With the cap, the very first sustained burst of 429s exhausts all 3 attempts bef
 
 ### 5.4 Prompt specificity (explicit vs. vague system prompt)
 
-**Change:** `prompts/swebench.md` (35 lines: turn format, `search_code_with_context` efficiency tip, explicit `final_answer(get_patch())` submission methodology) replaced with a 9-line vague version carrying only the turn format and the submission call, no methodology guidance. `qwen/qwen3.6-27b` on the 3 shortest tasks from the main matrix, reverted afterward (`git diff --stat` empty).
+**Change:** `src/agent_smith/prompts/swebench.md` (35 lines: turn format, `search_code_with_context` efficiency tip, explicit `final_answer(get_patch())` submission methodology) replaced with a 9-line vague version carrying only the turn format and the submission call, no methodology guidance. `qwen/qwen3.6-27b` on the 3 shortest tasks from the main matrix, reverted afterward (`git diff --stat` empty).
 
 | Task | Explicit prompt (baseline) | Vague prompt |
 |---|---|---|
@@ -398,7 +398,7 @@ Also 3/3 on the weaker model, and — unlike 5.4's prompt ablation — this one 
 
 Their result, on the 7-task matrix: **6/7 → 5/7**, with `scikit-learn__scikit-learn-13439` flipping from solved (7 iterations) to an outright failure (30 iterations, never called `final_answer()`), and general verbosity up across most tasks (input tokens +67–90% on `sympy-14711` and `sympy-18189`).
 
-**This was reproduced independently** — the same paragraph inserted into `prompts/swebench.md` (after `{tools}`, before the `search_code_with_context` tip), the same model, the same 7 tasks, reverted afterward (`git diff --stat` empty, `pytest tests/test_prompts.py` 12/12):
+**This was reproduced independently** — the same paragraph inserted into `src/agent_smith/prompts/swebench.md` (after `{tools}`, before the `search_code_with_context` tip), the same model, the same 7 tasks, reverted afterward (`git diff --stat` empty, `pytest tests/test_prompts.py` 12/12):
 
 | Task | Baseline (no paragraph) | Teammate's run (with paragraph) | This reproduction (with paragraph) |
 |---|---|---|---|
