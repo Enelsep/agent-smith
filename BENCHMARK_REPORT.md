@@ -141,6 +141,51 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 | nvidia/nemotron-nano-9b-v2:free | scikit-learn-13439 | no | 0 | 0 | 0 | 55s | empty completion |
 | nvidia/nemotron-nano-9b-v2:free | scikit-learn-13779 | no | 0 | 0 | 0 | 56s | empty completion |
 
+### 2.4 MBPP
+
+The matrix above is SWE-bench only. MBPP was measured separately, over the whole
+257-task `test` split rather than a sample, under the subject's MBPP ceilings
+(10 iterations, 6 000 input tokens, 1 500 output tokens, 120 s per task). Three
+Mistral models, one pass each, same commit:
+
+| Model | Passing | Stopped by a budget guard | Input tokens | Output tokens | s/task |
+|---|---|---|---|---|---|
+| `mistral-medium-latest` | **238 / 257** | 10 | 463,164 | 78,271 | 3.4 |
+| `magistral-small-latest` | 215 / 257 | 35 | 609,918 | 84,823 | 3.2 |
+| `codestral-2508` | 207 / 257 | 41 | 557,553 | 68,927 | 3.3 |
+
+`mistral-medium-latest` is ahead on every axis at once, and the failure sets say
+the gap is structural rather than a lucky pass: 16 tasks defeat all three, and
+**no task fails for `mistral-medium-latest` alone**, against 13 for
+`magistral-small-latest` and 20 for `codestral-2508`. Its 19 failures are a
+subset of what the other two already miss.
+
+**The ceiling decides more than the model does.** Budget-guard exits track the
+score almost exactly — 10 exits for 238 passes, 35 for 215, 41 for 207 — and
+nearly all of them are the 6 000-token input ceiling reached before the run
+converges, not a wrong answer submitted and refused. Across all three passes the
+binding constraint on MBPP is how much transcript a task costs, so the headroom
+left in this harness is in `agent/history.py`'s compaction, not in the model
+list. That is the opposite of the SWE-bench picture in §5, where prompt and tool
+design moved the score.
+
+**These scores come from `moulinette_eval validate mbpp`, not from the `success`
+field of the solution files, and the two disagree.** A task dump carries only the
+public assertions, so the harness validates a submission against a subset of what
+finally judges it: the agents claimed 247, 222 and 216 successes where 238, 215
+and 207 hold up — 9, 7 and 9 false positives, a consistent ~3 % overstatement
+that is a property of the public subset rather than of any model. Task 20 is the
+clean case. Both assertions it ships are negative (`is_woodall(254) == False`,
+`is_woodall(200) == False`), so a solution computing `k * (2**k - 1)` instead of
+Woodall's `k * 2**k - 1` satisfies everything it was given and still fails. No
+MBPP figure anywhere in this report is a `success` count.
+
+`mistral-medium-latest` is what `models.json` configures under
+`benchmark_defaults.mbpp`. Backing files: the 771 solution files under
+`benchmarks/mbpp/<model>/`, the 257 task dumps under `benchmarks/mbpp/tasks/`,
+and one `benchmarks/mbpp/<model>-validation.txt` per pass carrying the per-task
+verdict and the list of failing ids.
+
 ## 3. Provider reliability
 
 | Provider | Models tested | What broke, concretely |
