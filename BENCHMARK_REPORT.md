@@ -14,7 +14,7 @@
 | `codestral-2508` | Mistral | code-specialised, configured default for MBPP |
 | `llama-3.3-70b-versatile` | Groq | |
 | `devstral-medium-latest` | Mistral | code-specialised |
-| `poolside/laguna-s-2.1:free` | Poolside | coding-focused startup model |
+| `poolside/laguna-s-2.1` | Poolside | coding-focused startup model |
 | `llama-3.1-8b-instant` | Groq | smallest model in the pool, for a capability floor |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | |
 
@@ -51,7 +51,7 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 | `codestral-2508` | Mistral | 5/7 | 491,593 | 3,333 | 125s |
 | `llama-3.3-70b-versatile` | Groq | 5/7 | 77,344 | 813 | 232s |
 | `devstral-medium-latest` | Mistral | 4/7 | 582,465 | 4,503 | 1,025s |
-| `poolside/laguna-s-2.1:free` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
+| `poolside/laguna-s-2.1` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
 | `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 
@@ -446,7 +446,7 @@ The three models with the highest total input-token spend are not the best perfo
 
 | Model | Total input tokens | Solved |
 |---|---|---|
-| `poolside/laguna-s-2.1:free` | 692,208 | 3/7 |
+| `poolside/laguna-s-2.1` | 692,208 | 3/7 |
 | `devstral-medium-latest` | 582,465 | 4/7 |
 | `gemini-3.1-flash-lite` | 492,995 | 6/7 |
 | `qwen/qwen3.6-27b` | **101,022** | **7/7** |
@@ -490,6 +490,6 @@ The most expensive thing that happened during this project was not a large token
 
 **Deprioritise on capability grounds: `codestral-2508`, `llama-3.3-70b-versatile`.** Both 5/7, but the failures cluster on the harder tasks (`sympy-14711`, `scikit-learn-13779`) rather than on infrastructure — `codestral-2508` never once needed a retry and still failed to converge twice.
 
-**Deprioritise on reliability grounds: `poolside/laguna-s-2.1:free` (3/7, non-convergent on 4/7), `llama-3.1-8b-instant` (2/7, context-window-limited on 4/7), `nvidia/nemotron-nano-9b-v2:free` (2/7, reasoning-token starvation on 5/7).** Different root causes (§8.1, §6.1), same practical outcome: not dependable enough for a graded run under this project's fixed budgets.
+**Deprioritise on reliability grounds: `poolside/laguna-s-2.1` (3/7, non-convergent on 4/7), `llama-3.1-8b-instant` (2/7, context-window-limited on 4/7), `nvidia/nemotron-nano-9b-v2:free` (2/7, reasoning-token starvation on 5/7).** Different root causes (§8.1, §6.1), same practical outcome: not dependable enough for a graded run under this project's fixed budgets.
 
 **Drop `devstral-medium-latest` and `gemini-3.6-flash`/`gemma-4-31b-it` from consideration.** `devstral-medium-latest` is the highest-token, lowest-solve-rate model that still technically ran to completion (4/7). The two discarded Google models never produced a usable comparison at all — one to a provider-side lockout, one to the reasoning-token pattern combined with excessive latency — which is itself a data point: not every free-tier model is worth finishing a full matrix on, and recognising that early is part of running this kind of campaign efficiently.

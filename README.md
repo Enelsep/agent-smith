@@ -227,7 +227,7 @@ Implementation notes that mattered in practice:
 | `codestral-2508` | Mistral | 5/7 | 491,593 | 3,333 | 125s |
 | `llama-3.3-70b-versatile` | Groq | 5/7 | 77,344 | 813 | 232s |
 | `devstral-medium-latest` | Mistral | 4/7 | 582,465 | 4,503 | 1,025s |
-| `poolside/laguna-s-2.1:free` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
+| `poolside/laguna-s-2.1` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
 | `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 

@@ -4,14 +4,6 @@
       "base_url": "https://api.groq.com/openai/v1",
       "default_model": "qwen/qwen3.6-27b",
       "models": {
-        "llama-3.3-70b-versatile": {
-          "stop": ["<end_code>", "</tool_call>", "Observation:"],
-          "max_tokens": 1500
-        },
-        "llama-3.1-8b-instant": {
-          "stop": ["<end_code>", "</tool_call>", "Observation:"],
-          "max_tokens": 1500
-        },
         "qwen/qwen3.6-27b": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
@@ -70,9 +62,9 @@
     },
     "poolside": {
       "base_url": "https://inference.poolside.ai/v1",
-      "default_model": "poolside/laguna-s-2.1:free",
+      "default_model": "poolside/laguna-s-2.1",
       "models": {
-        "poolside/laguna-s-2.1:free": {
+        "poolside/laguna-s-2.1": {
           "stop": ["<end_code>", "</tool_call>", "Observation:"],
           "max_tokens": 1500
         }
