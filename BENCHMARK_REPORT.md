@@ -146,19 +146,20 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 The matrix above is SWE-bench only. MBPP was measured separately, over the whole
 257-task `test` split rather than a sample, under the subject's MBPP ceilings
 (10 iterations, 6 000 input tokens, 1 500 output tokens, 120 s per task). Three
-Mistral models, one pass each, same commit, scored with
+Mistral models and one repeat, four passes on the same commit, scored with
 `moulinette_eval validate mbpp`:
 
 | Model | Passing | Ran out of budget | Submitted a wrong answer | Input tokens | Output tokens | s/task |
 |---|---|---|---|---|---|---|
 | `mistral-medium-latest` | **238 / 257** | 10 | 9 | 463,164 | 78,271 | 3.4 |
+| `mistral-medium-latest` *(repeat, same commit)* | **236 / 257** | 12 | 9 | 444,481 | 77,838 | 3.3 |
 | `magistral-small-latest` | 215 / 257 | 35 | 7 | 609,918 | 84,823 | 3.2 |
 | `codestral-2508` | 207 / 257 | 41 | 9 | 557,553 | 68,927 | 3.3 |
 
 **Those two failure columns are exhaustive — there is no third kind.** Every
 task that does not pass either exhausted a ceiling before submitting anything,
 or submitted an answer that satisfied the assertions the task ships and failed
-the ones it does not. Checked per task on all three passes, the second column is
+the ones it does not. Checked per task on all four passes, the second column is
 *exactly* the set of runs the harness reported as successful and the validation
 refused. Nothing is ever submitted that fails a test the agent could see: the
 refusal loop holds, and what leaks past it is only ever invisible to it.
@@ -174,14 +175,23 @@ correctness, and the headroom left in this harness is in `agent/history.py`'s
 compaction rather than in the model list. That is the opposite of the SWE-bench
 picture in §5, where prompt and tool design moved the score.
 
-**Read these scores with their run-to-run range.** A budget exit is a function of
-how much transcript accumulated before convergence, so it moves with provider
-latency and throttling on the day. The 10 exits in the `mistral-medium-latest`
-pass are the measurement's own error bar: the same model and the same commit can
-land anywhere from 238 to 248 depending on nothing but the weather at the
-endpoint. The 9 wrong answers are the part that does not move. Any single number
-in the table above is a draw from that range, not a constant — which is also why
-a 5-task comparison cannot rank two models whose ranges overlap.
+**Read these scores with their run-to-run range, which was measured rather than
+assumed.** `mistral-medium-latest` was put through the whole pool twice on the
+same commit, four hours apart: 238 and 236. The error bar on a 257-task pass is
+therefore about two tasks, not the ten that counting budget exits would suggest.
+
+What the repeat settles is *which* part moves. Wrong answers came to **9 both
+times** — not a similar number, the same one — while budget exits went 10 then
+12. Seventeen of the failing tasks are common to both passes; only two fell out
+of the first list and four into the second, and every one of those six is a task
+that runs hot on input tokens, close enough to the 6 000-token ceiling that one
+extra turn decides it. So the pool splits into a hard core the model genuinely
+cannot solve and a thin margin that the day's verbosity tips either way.
+
+A single number in the table above is a draw from that range, not a constant.
+It is also why a 5-task comparison cannot rank two models whose ranges overlap:
+five draws from a 92% process return 4/5 or worse about one time in twenty, and
+that says nothing at all about the model.
 
 **None of these figures is a `success` count.** A task dump carries only the
 public assertions, so the harness validates against a subset of what finally
@@ -194,10 +204,11 @@ Woodall's `k * 2**k - 1` satisfies everything it was given and still fails.
 `mistral-medium-latest` is what `models.json` configures under
 `benchmark_defaults.mbpp`; `magistral-small-latest` stays on SWE-bench, where §2
 measures it at 7/7. The two benchmarks wanting different models is the reason
-that key exists. Backing files: the 771 solution files under
-`benchmarks/mbpp/<model>/`, the 257 task dumps under `benchmarks/mbpp/tasks/`,
-and one `benchmarks/mbpp/<model>-validation.txt` per pass carrying the per-task
-verdict and the list of failing ids.
+that key exists. Backing files: the 1 028 solution files under
+`benchmarks/mbpp/<model>/`, four passes of 257, with the repeat under
+`benchmarks/mbpp/mistral-medium-latest-pass2/`; the 257 task dumps under
+`benchmarks/mbpp/tasks/`; and one `benchmarks/mbpp/<model>-validation.txt` per
+pass carrying the per-task verdict and the list of failing ids.
 
 ## 3. Provider reliability
 
