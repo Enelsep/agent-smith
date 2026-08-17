@@ -96,6 +96,31 @@ This is a scoring-side problem only. The agent itself never copies into a contai
 declares read-only bind mounts at `docker run` and speaks over `docker exec -i`, so nothing it
 does goes through the failing path.
 
+**`dump swebench` can also die on a GitHub rate limit, and the message blames the wrong
+thing.** Building a task spec fetches the repository's `environment.yml` from
+`raw.githubusercontent.com`, unauthenticated, once per dump. Enough dumps in a short window and
+that endpoint answers 429 — after which
+`swebench.harness.test_spec.python.get_environment_yml_by_commit` turns every non-200 into one
+message:
+
+```
+ValueError: Could not find environment.yml at paths
+['ci/requirements/environment.yml', 'environment.yml'] for repo pydata/xarray at commit 1c198a19…
+```
+
+It says the file is missing; it means the request was refused. Settle it with
+
+```bash
+curl -o /dev/null -w '%{http_code}\n' \
+  https://raw.githubusercontent.com/<repo>/<commit>/ci/requirements/environment.yml
+```
+
+There is nothing to fix locally: the request carries a User-Agent and no authentication, and the
+bundled `swebench/resources/swebench-og/` cache does not hold every instance. It clears on its
+own — about fifteen minutes when we hit it — so the fix is to wait, and to avoid a campaign that
+re-dumps the same tasks in a loop. As above, the agent is never reached: the run dies before it
+starts.
+
 **Run a benchmark campaign** — the model × task matrix, resumable, one image resident at a time:
 
 ```bash
