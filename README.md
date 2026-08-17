@@ -37,7 +37,7 @@ Keys are discovered from the endpoint: `--provider-url https://api.mistral.ai/v1
 ```bash
 uv run python -m agent_mbpp \
   --task-file tests/fixtures/mbpp_tasks.json --output solution.json \
-  --provider-url https://api.mistral.ai/v1 --model-name codestral-2508
+  --provider-url https://api.mistral.ai/v1 --model-name mistral-medium-latest
 ```
 
 **Run one SWE-bench task** (pulls the task's image)
@@ -231,15 +231,17 @@ Implementation notes that mattered in practice:
 | `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 
-MBPP baseline: **233/257** with `mistral-medium-latest`.
+MBPP, measured over the whole 257-task pool rather than a sample: **238/257** with `mistral-medium-latest`, against 215 for `magistral-small-latest` and 207 for `codestral-2508`.
 
 **What the numbers say.**
 
-**Recommended default for SWE-bench: `qwen/qwen3.6-27b` (Groq).** The only model in the 11-way comparison with a perfect 7/7, including the one task (`scikit-learn-13779`) that stumped every OpenRouter and most Mistral models. Its raw efficiency is not the best in the pool (see §8.2), but efficiency-on-a-hard-ceiling — solving the tasks other models time out on — is what a 30-iteration/300k-token exam ceiling actually rewards.
+**Three models tie at 7/7** — `mistral-medium-latest`, `magistral-small-latest` and `qwen/qwen3.6-27b` — so capability does not pick the default. **SWE-bench runs on `magistral-small-latest`**, the fastest of the three end to end and the one whose provider gives us two keys against a per-second limit, where throttling arrives as delay the retry budget can spend rather than as a wall.
 
-**Strong second choice, different provider: `qwen/qwen3-235b-a22b-2507` (OpenRouter) or `magistral-small-latest` (Mistral).** Both 6-7/7, both efficient on what they solve. Keeping one of these configured as a fallback protects against the Groq-specific failure modes observed here (`llama-3.1-8b-instant`'s HTTP 413s, `llama-3.3-70b-versatile`'s one lockout) without adding a fourth provider to manage day-to-day.
+**`qwen/qwen3.6-27b` (Groq) is the cheapest by a wide margin** — the same 7/7 on 101,022 input tokens, a fifth of what `magistral-small-latest` spends — and would be the better choice on the numbers alone with a second key behind it.
 
-Full matrix, provider reliability, intermediary metrics and ablations: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). Backing `solution.json` files under `benchmarks/runs/`.
+**MBPP runs on `mistral-medium-latest`**, which the pool measures highest. The two benchmarks wanting different models is why `models.json` carries a default per benchmark.
+
+Full matrix, provider reliability, intermediary metrics and ablations: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). Backing `solution.json` files under `benchmarks/runs/` (SWE-bench) and `benchmarks/mbpp/` (MBPP).
 
 ## Resources
 
