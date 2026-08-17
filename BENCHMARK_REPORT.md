@@ -30,10 +30,10 @@ Two additional models were tried and **discarded before completing a full run** 
 | 1 | `sympy__sympy-14711` | Subject's own suggestion (p.21) | `<15 min fix` |
 | 2 | `sympy__sympy-13480` | Subject's own suggestion (p.21) | `<15 min fix` |
 | 3 | `pydata__xarray-4629` | Subject's own suggestion (p.21) | `<15 min fix` |
-| 4 | `django__django-11066` | `moulinette`'s `EXAM_POOL` (verified solvable by reference models) | `<15 min fix` |
-| 5 | `sympy__sympy-18189` | `moulinette`'s `EXAM_POOL` | `<15 min fix` |
-| 6 | `scikit-learn__scikit-learn-13439` | `moulinette`'s `EXAM_POOL` | `<15 min fix` |
-| 7 | `scikit-learn__scikit-learn-13779` | `moulinette.list_instances(exclude_exam_pool=True)`, same difficulty tier | `<15 min fix` |
+| 4 | `django__django-11066` | Added for repository coverage: the subject's three are sympy and xarray only | `<15 min fix` |
+| 5 | `sympy__sympy-18189` | Second sympy task, to separate repository from instance | `<15 min fix` |
+| 6 | `scikit-learn__scikit-learn-13439` | Fourth repository, same difficulty tier | `<15 min fix` |
+| 7 | `scikit-learn__scikit-learn-13779` | Second scikit-learn task, same tier, kept as the harder control | `<15 min fix` |
 
 Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `solution.json` files live at `benchmarks/runs/<model-slug>/<task_id>.json`, produced by `benchmarks/swe-matrix.sh`.
 
