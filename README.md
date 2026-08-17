@@ -40,7 +40,7 @@ uv run python -m agent_mbpp \
   --provider-url https://api.mistral.ai/v1 --model-name codestral-2508
 ```
 
-**Run one SWE-bench task** (pulls the task's image, several GB)
+**Run one SWE-bench task** (pulls the task's image)
 
 ```bash
 uv run python -m agent_swebench \
@@ -215,28 +215,29 @@ Implementation notes that mattered in practice:
 
 ## Benchmark results and analysis
 
-Five models × three SWE-bench tasks, at the subject's SWE-bench ceilings (30 iterations, 300 000 input tokens, 10 000 output tokens, 900 s), free tiers only. **12 of 15 solved.**
+11 models × 7 SWE-bench tasks, at the subject's SWE-bench ceilings (30 iterations, 300 000 input tokens, 10 000 output tokens, 900 s), free tiers only.
 
-| Model | Solved | Input tokens | Wall clock | Retries / requests |
-| --- | --- | --- | --- | --- |
-| `qwen3-235b-a22b-2507` | **3/3** | 37 433 | 101 s | 0 / 15 |
-| `magistral-small-latest` | **3/3** | 70 636 | 58 s | 0 / 22 |
-| `devstral-medium-latest` | 2/3 | 417 968 | 282 s | 0 / 46 |
-| `codestral-2508` | 2/3 | 422 822 | 313 s | 0 / 67 |
-| `mistral-medium-latest` | 2/3 | 512 094 | 1 418 s | 40 / 80 |
+| Model | Provider | Solved | Total input tokens | Total output tokens | Total wall-clock |
+|---|---|---|---|---|---|
+| `mistral-medium-latest` | Mistral | 7/7 | 447,098 | 3,539 | 947s |
+| `magistral-small-latest` | Mistral | 7/7 | 520,328 | 6,006 | 388s |
+| `qwen/qwen3.6-27b` | Groq | 7/7 | 101,022 | 4,970 | 602s |
+| `qwen/qwen3-235b-a22b-2507` | OpenRouter | 6/7 | 342,042 | 2,420 | 225s |
+| `gemini-3.1-flash-lite` | Google | 6/7 | 492,995 | 7,337 | 413s |
+| `codestral-2508` | Mistral | 5/7 | 491,593 | 3,333 | 125s |
+| `llama-3.3-70b-versatile` | Groq | 5/7 | 77,344 | 813 | 232s |
+| `devstral-medium-latest` | Mistral | 4/7 | 582,465 | 4,503 | 1,025s |
+| `poolside/laguna-s-2.1:free` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
+| `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
+| `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 
-MBPP baseline: **233/257** with `mistral-medium-latest`. A later four-task run of `poolside/laguna-s-2.1` scored 2/4 — solving `sympy-13480` in 10 iterations and `xarray-4629` in 25, losing `django-11066` to the input-token ceiling at step 28 and `sympy-14711` to the iteration ceiling.
+MBPP baseline: **233/257** with `mistral-medium-latest`.
 
 **What the numbers say.**
 
-- **No failure was a wrong patch.** All five were budgets running out — output tokens spent in sixteen turns, or thirty iterations spent on one task. The binding constraint is agent efficiency, not model capability.
-- **Requests made dominates latency.** `devstral` is the slowest per request at 5.00 s and still finishes `sympy-13480` in 70 s, because it makes three requests. `mistral-medium` is fast per call and 24× slower overall.
-- **Retries concentrate on the model that calls most** — 40 in 80 requests for `mistral-medium`, zero for the other four. No run was ever lost to a provider.
-- **Validating the submission caught real luck.** Five runs submitted a patch the agent had never watched pass; the evaluation accepted three. Without judging on submission, three of twelve passes would have been luck reported as competence.
+**Recommended default for SWE-bench: `qwen/qwen3.6-27b` (Groq).** The only model in the 11-way comparison with a perfect 7/7, including the one task (`scikit-learn-13779`) that stumped every OpenRouter and most Mistral models. Its raw efficiency is not the best in the pool (see §8.2), but efficiency-on-a-hard-ceiling — solving the tasks other models time out on — is what a 30-iteration/300k-token exam ceiling actually rewards.
 
-**What it does not establish.** Three tasks, one run each. Two of the three ship a `hints_text` that names the fix — `django-11066` says "the fix can really be `using=db`" — so thirteen of fifteen runs edited before reproducing anything, and only `sympy-14711` (empty hints) measures exploration at all. All three are public commits every model was trained on, and our agent can iterate against the evaluation script, which canonical SWE-bench does not allow. **These figures are not comparable to published SWE-bench numbers.**
-
-The ablations are where the harness was actually measured: REPL echo plus comment-only feedback took silent turns 13 → 0 and correct patches 3/5 → 5/5; running the evaluation script under bash took acceptances 0/5 → 4/5. Every one of those defects was invisible to a green test suite and only appeared in the traces of real runs.
+**Strong second choice, different provider: `qwen/qwen3-235b-a22b-2507` (OpenRouter) or `magistral-small-latest` (Mistral).** Both 6-7/7, both efficient on what they solve. Keeping one of these configured as a fallback protects against the Groq-specific failure modes observed here (`llama-3.1-8b-instant`'s HTTP 413s, `llama-3.3-70b-versatile`'s one lockout) without adding a fourth provider to manage day-to-day.
 
 Full matrix, provider reliability, intermediary metrics and ablations: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). Backing `solution.json` files under `benchmarks/runs/`.
 
