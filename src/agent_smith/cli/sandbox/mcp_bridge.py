@@ -67,7 +67,15 @@ class MCPBridge:
         if self._failure is not None:
             failure = self._failure
             self.close()
-            raise MCPBridgeError(f"cannot use the MCP server: {failure}") from failure
+            # A cancellation carries the scope it died in and nothing about
+            # what went wrong, so say what it means instead. The CLI adds the
+            # endpoint, which is the part its caller can check or correct.
+            reason = (
+                "the server never completed the handshake"
+                if isinstance(failure, asyncio.CancelledError)
+                else str(failure)
+            )
+            raise MCPBridgeError(f"cannot use the MCP server: {reason}") from failure
 
     def call(self, name: str, arguments: dict[str, Any]) -> str:
         """Run one tool and block until it answers. Never raises.
@@ -108,7 +116,11 @@ class MCPBridge:
         """The thread body: one event loop, for one session, start to finish."""
         try:
             asyncio.run(self._serve())
-        except Exception as unexpected:  # noqa: BLE001 - reported through start()
+        # `CancelledError` derives from `BaseException`, so `except Exception`
+        # lets it past while the `finally` below still reports the bridge
+        # ready. `start()` then sees no failure and opens a prompt whose tools
+        # cannot work, and the thread dies loudly on the way out.
+        except (Exception, asyncio.CancelledError) as unexpected:  # noqa: BLE001
             self._failure = unexpected
         finally:
             self._ready.set()
@@ -122,7 +134,9 @@ class MCPBridge:
         try:
             await self._client.connect()
             await registry.discover_tools()
-        except Exception as unreachable:  # noqa: BLE001 - reported through start()
+        # Same reason as above: an unreachable endpoint surfaces as a cancelled
+        # task, not as a plain exception.
+        except (Exception, asyncio.CancelledError) as unreachable:  # noqa: BLE001
             self._failure = unreachable
             await self._disconnect()
             return

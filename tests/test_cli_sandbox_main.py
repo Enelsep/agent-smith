@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from typing import TYPE_CHECKING, Any
@@ -36,14 +37,18 @@ class FakeMCPClient:
         self,
         tools: list[MCPToolDefinition] | None = None,
         fail_on_connect: bool = False,
+        cancel_on_connect: bool = False,
     ) -> None:
         self.tools = [READ_FILE] if tools is None else tools
         self.fail_on_connect = fail_on_connect
+        self.cancel_on_connect = cancel_on_connect
         self.connected = False
         self.disconnected = False
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def connect(self) -> None:
+        if self.cancel_on_connect:
+            raise asyncio.CancelledError
         if self.fail_on_connect:
             raise ConnectionError("no server there")
         self.connected = True
@@ -323,6 +328,18 @@ def test_a_server_that_will_not_connect_is_reported_not_swallowed() -> None:
     bridge = MCPBridge(FakeMCPClient(fail_on_connect=True))
 
     with pytest.raises(MCPBridgeError, match="no server there"):
+        bridge.start()
+
+
+def test_a_cancelled_handshake_is_reported_like_any_other_failure() -> None:
+    # An unreachable HTTP endpoint surfaces as a cancelled task rather than a
+    # plain exception, and `CancelledError` derives from `BaseException`. Caught
+    # with `except Exception` it slips past, the bridge reports itself ready
+    # with no failure recorded, and the CLI opens a prompt whose tools cannot
+    # work while the bridge thread dies printing its traceback.
+    bridge = MCPBridge(FakeMCPClient(cancel_on_connect=True))
+
+    with pytest.raises(MCPBridgeError, match="never completed the handshake"):
         bridge.start()
 
 

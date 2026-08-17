@@ -160,7 +160,11 @@ def main() -> None:
             try:
                 bridge.start()
             except MCPBridgeError as unreachable:
-                _die(str(unreachable), RUNTIME_EXIT)
+                # Name what was asked for: a wrong URL or a server that is not
+                # up yet are the two ordinary causes, and both are visible from
+                # the endpoint alone.
+                endpoint = args.mcp_server or args.mcp_stdio
+                _die(f"{unreachable} ({endpoint})", RUNTIME_EXIT)
             session.callback(bridge.close)
             tool_defs, handler = bridge.tool_defs, bridge.call
 
