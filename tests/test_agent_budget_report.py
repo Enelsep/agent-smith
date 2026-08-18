@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_smith.agent.report import budget_report
+from agent_smith.agent.report import budget_report, failure_curve, first_drop
 from agent_smith.models.contract import SolutionOutput, StepMetrics
 
 
@@ -120,3 +120,38 @@ def test_a_run_with_no_tools_at_all_claims_none() -> None:
     )
 
     assert "gcd" not in budget_report(run)
+
+
+def _with_outputs(*outputs: str) -> SolutionOutput:
+    return a_run(
+        *(
+            a_step(index, code="print(run_tests())", observation=text, tokens=0)
+            for index, text in enumerate(outputs, start=1)
+        )
+    )
+
+
+def test_the_curve_only_counts_steps_that_measured_something() -> None:
+    # A step that ran no tests contributes no point: the curve is the sequence
+    # of readings the run took, not one entry per iteration.
+    solution = _with_outputs(
+        "Summary: 2 passed, 3 failed",
+        "some file contents",
+        "Summary: 4 passed, 1 failed",
+    )
+
+    assert failure_curve(solution) == [(1, 3), (3, 1)]
+
+
+def test_the_first_drop_is_measured_against_the_run_s_own_baseline() -> None:
+    # What the suite reports before any edit is a property of the task, so the
+    # baseline is the first reading rather than a fixed number.
+    assert first_drop([(2, 5), (4, 5), (7, 2), (9, 0)]) == 7
+
+
+def test_a_run_that_never_improved_is_not_a_step_number() -> None:
+    # None rather than a sentinel: the report has to tell "never dropped" from
+    # "dropped at step 0", and a number cannot say the first.
+    assert first_drop([(1, 3), (5, 3), (8, 4)]) is None
+    assert first_drop([(1, 3)]) is None
+    assert first_drop([]) is None

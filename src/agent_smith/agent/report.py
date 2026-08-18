@@ -55,11 +55,62 @@ def budget_report(solution: SolutionOutput) -> str:
     return "\n".join(lines)
 
 
+_SUMMARY = re.compile(r"Summary:\s*(\d+)\s+passed,\s*(\d+)\s+failed")
+
+
+def failure_curve(solution: SolutionOutput) -> list[tuple[int, int]]:
+    """`(step, failing tests)` for every step whose observation reports a run.
+
+    Read off the `Summary:` line `run_tests` writes, so a step that ran nothing
+    contributes nothing: the curve is the sequence of measurements the agent
+    actually took, not one point per iteration.
+    """
+    seen: list[tuple[int, int]] = []
+    for step in solution.steps:
+        found = _SUMMARY.search(step.sandbox_output or "")
+        if found:
+            seen.append((step.step, int(found.group(2))))
+    return seen
+
+
+def first_drop(curve: list[tuple[int, int]]) -> int | None:
+    """The step where failures first fall below the run's own first reading.
+
+    The subject's second intermediary metric. The baseline is the first count
+    the run measured rather than a fixed number, because what the suite reports
+    before any edit is a property of the task, not of the agent.
+
+    `None` covers both a run that never measured twice and one that never
+    improved -- the report has to tell those apart from the curve itself, and
+    a sentinel step number would hide the difference.
+    """
+    if len(curve) < 2:
+        return None
+    baseline = curve[0][1]
+    for step, failing in curve[1:]:
+        if failing < baseline:
+            return step
+    return None
+
+
+def failure_report(solution: SolutionOutput) -> str:
+    """When the failures started dropping, and what they did on the way."""
+    curve = failure_curve(solution)
+    if not curve:
+        return f"{solution.task_id}: no test run reported a summary."
+    drop = first_drop(curve)
+    trail = " -> ".join(f"{step}:{failing}" for step, failing in curve)
+    when = "never below its baseline" if drop is None else f"first drop at step {drop}"
+    return f"{solution.task_id}: {when} (failing by step: {trail})"
+
+
 def main() -> None:
     """Print the report for each solution file named on the command line."""
     for path in sys.argv[1:]:
         raw = Path(path).read_text(encoding="utf-8")
-        print(budget_report(SolutionOutput.model_validate_json(raw)))
+        solution = SolutionOutput.model_validate_json(raw)
+        print(budget_report(solution))
+        print(failure_report(solution))
         print()
 
 
