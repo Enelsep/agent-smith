@@ -1,5 +1,3 @@
-moulinette/
-
 # Secrets — never committed (see CONTRIBUTING.md)
 .env
 .env.*
