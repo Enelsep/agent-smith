@@ -212,7 +212,7 @@ pass carrying the per-task verdict and the list of failing ids.
 
 ## 3. Provider reliability
 
-Computed from the `steps[]` of the 77 solution files under `benchmarks/runs/`, one
+Computed from the `steps[]` of the 84 solution files under `benchmarks/runs/`, one
 row per model actually put through the matrix. **Avg response time** is the mean of
 `request_time_ms` over every request the model made — the endpoint's own latency, not
 the wall-clock of a task, which also contains sandbox execution and tool calls.
