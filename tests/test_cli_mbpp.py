@@ -12,7 +12,7 @@ from agent_smith.cli.mbpp import main as cli
 from agent_smith.cli.mbpp import prompt as prompt_module
 from agent_smith.cli.mbpp.prompt import build_system_prompt, task_prompt
 from agent_smith.config import ConfigError
-from agent_smith.models.contract import MBPPTaskInput, SolutionOutput
+from agent_smith.models.contract import MBPPTaskInput, SandboxConfig, SolutionOutput
 from agent_smith.sandbox.protocol import ExecResult, Outcome
 
 A_TASK = MBPPTaskInput(
@@ -197,8 +197,11 @@ def budget_reaching_the_loop(
             stop=[],
             max_tokens=1500,
             api_keys=["k"],
-            sandbox=SimpleNamespace(
-                max_execution_time_seconds=5.0, authorized_imports=["math"]
+            # The real contract, not a stand-in: the CLI hands it to
+            # `Sandbox.from_config`, which reads every field rather than the
+            # two the loop happens to need.
+            sandbox=SandboxConfig(
+                max_execution_time_seconds=5, authorized_imports=["math"]
             ),
         ),
     )

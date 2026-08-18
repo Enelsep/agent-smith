@@ -195,7 +195,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                             "filepath": {"type": "string"},
                             "line": {"type": "integer"},
                         },
-                        "required": ["name"],
+                        "required": ["name", "filepath", "line"],
                     },
                 },
                 {
