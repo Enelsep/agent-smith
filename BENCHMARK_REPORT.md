@@ -281,7 +281,7 @@ Computed by walking `steps[]` in each successful run's `solution.json` (manual/s
 
 Every model that solves `sympy-13480` (the one-line typo) touches the right file on its very first step — the hint text essentially names the file, so this is the easy case. `xarray-4629` is the interesting split: `mistral-medium-latest` and `codestral-2508` locate `xarray/core/merge.py` on step 1, while `magistral-small-latest` needs 8 steps of exploration first (still finishes in 15 total) and `qwen3-235b-a22b-2507` needs 4.
 
-**(b) Iterations between "tests first pass" and `final_answer()`** (submission discipline — 0 is ideal, meaning the model submits the instant it has a passing run):
+**(b) Iterations between "tests first pass" and `final_answer()`** (submission discipline — 1 is the floor: `run_tests()` only reaches the model in the next turn's observation, so the earliest possible submission is the turn after it passes):
 
 | Model | sympy-14711 | sympy-13480 | xarray-4629 |
 |---|---|---|---|
