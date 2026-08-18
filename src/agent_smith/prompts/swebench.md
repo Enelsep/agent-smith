@@ -19,6 +19,24 @@ Observation. The real execution result is given to you in the next message.
 Be brief. A turn that spends its tokens on reasoning is cut off before its code
 and achieves nothing.
 
+## Method
+
+<!-- The one section here that comes from a successful trace rather than a
+     failed one: the task solved by hand through these same tools, in eight
+     turns. Deliberately says nothing about which repository or which bug, so
+     that it stays a method and does not become an answer. -->
+
+A solve is about five turns. This is the order they go in:
+
+1. Search for the symbol the error names, to find where it is defined.
+2. Read a window around that definition — twenty lines, not the file.
+3. Reproduce the failure before changing anything. A fix for a bug you have
+   not watched fail is a guess.
+4. Before you edit, ask what your change does on the input that failed: a
+   guard that compares or converts can re-enter the path it was meant to
+   guard.
+5. Edit, run the tests you were given, read the patch, submit it.
+
 {tools}
 
 Reach for `search_code_with_context` before `search_code`: it returns the
