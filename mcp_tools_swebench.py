@@ -26,14 +26,8 @@ def get_testbed_path() -> str:
     return os.environ.get("TESTBED_PATH", os.getcwd())
 
 
-# The repository root is `/testbed` inside the container, and the model writes
-# that prefix because the task statement and every listing show it. When the
-# server runs outside a container, TESTBED_PATH points somewhere else and the
-# same absolute paths have to land there instead.
 TESTBED_ROOT = "/testbed"
 
-# Every argument that carries a path. Rewriting them in one place at dispatch
-# keeps each tool branch free of the concern, and covers tools added later.
 PATH_ARGUMENTS = frozenset({"filepath", "directory", "workdir"})
 
 
@@ -65,15 +59,11 @@ def in_testbed(path: str) -> str:
     return path
 
 
-# ------------------------------------------------------------------------------
-# Request Dispatcher
-# ------------------------------------------------------------------------------
 def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     method = request.get("method")
     req_id = request.get("id")
     params = request.get("params", {}) or {}
 
-    # Standard notifications do not require a response
     if req_id is None:
         return None
 
@@ -276,10 +266,6 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 sc_kwargs: dict[str, Any] = {}
                 if "file_pattern" in args and args["file_pattern"] is not None:
                     sc_kwargs["file_pattern"] = str(args["file_pattern"])
-                # The three search tools take no directory from the model --
-                # there is only one repository to search. They default to `.`,
-                # which is the testbed only because the container runs us
-                # there; naming it holds wherever the server is started.
                 output = search_code(pattern, directory=testbed, **sc_kwargs)
 
             elif name == "search_code_with_context":
@@ -317,11 +303,6 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 rt_kwargs: dict[str, Any] = {}
                 script = str(args.get("eval_script") or "").strip()
                 if not script:
-                    # The task's own script, put here by the harness. A model
-                    # asked to reproduce two thousand characters of bash gets
-                    # it wrong in every way bash allows, and it never had a
-                    # reason to: the script does not depend on anything the
-                    # model knows.
                     script = _task_eval_script()
                 if script:
                     rt_kwargs["eval_script"] = script
@@ -412,9 +393,6 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-# ------------------------------------------------------------------------------
-# Stdio Loop
-# ------------------------------------------------------------------------------
 async def main() -> None:
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
@@ -433,13 +411,6 @@ async def main() -> None:
         try:
             request = json.loads(raw)
         except json.JSONDecodeError:
-            # JSON-RPC says answer a parse error with a null id, and the MCP
-            # client's schema says an id is an int or a string -- so that reply
-            # fails validation, takes the client's reader down with it, and the
-            # run hangs on a bridge that will never answer again. Measured: a
-            # campaign stopped dead for 25 minutes on one task. There is also
-            # nothing useful to say, the id being what a reply is matched by.
-            # Reported on stderr, which is not the protocol channel.
             print("skipped an unparsable line", file=sys.stderr, flush=True)
             continue
 

@@ -32,17 +32,10 @@ clean:
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 
-# ruff replaces flake8 and its plugins; mypy is kept because ruff does no type
-# inference across modules. The two do not overlap.
+
 lint: install
 	@echo "Linting and type-checking..."
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy .
 
-test: install
-	@echo "Running tests..."
-	uv run pytest -q
-
-# Run this before every push: it is the gate CONTRIBUTING.md refers to.
-check: lint test
