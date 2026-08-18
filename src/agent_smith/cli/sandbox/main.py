@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agent_smith.cli.sandbox.mcp_bridge import MCPBridge, MCPBridgeError
-from agent_smith.cli.sandbox.repl import run_repl
+from agent_smith.cli.sandbox.repl import run_repl, run_script
 from agent_smith.config import ConfigError
 from agent_smith.config.loader import load_sandbox_config
 from agent_smith.mcp.formatter import to_sandbox_manual
@@ -160,11 +160,19 @@ def main() -> None:
             try:
                 bridge.start()
             except MCPBridgeError as unreachable:
-                _die(str(unreachable), RUNTIME_EXIT)
+                # Name what was asked for: a wrong URL or a server that is not
+                # up yet are the two ordinary causes, and both are visible from
+                # the endpoint alone.
+                endpoint = args.mcp_server or args.mcp_stdio
+                _die(f"{unreachable} ({endpoint})", RUNTIME_EXIT)
             session.callback(bridge.close)
             tool_defs, handler = bridge.tool_defs, bridge.call
 
         sandbox = session.enter_context(
             Sandbox.from_config(config, tool_defs=tool_defs, tool_handler=handler)
         )
-        run_repl(sandbox, banner=describe(sandbox, tool_defs))
+        banner = describe(sandbox, tool_defs)
+        if sys.stdin.isatty():
+            run_repl(sandbox, banner=banner)
+        else:
+            run_script(sandbox, sys.stdin.read(), banner=banner)

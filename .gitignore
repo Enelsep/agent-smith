@@ -36,3 +36,7 @@ target/
 # Matrix runs. Only the solution.json files backing BENCHMARK_REPORT.md are
 # committed, with git add -f (see CONTRIBUTING.md).
 benchmarks/runs*/
+
+# Scratch trees the MBPP validator is pointed at: symlinks to absolute local
+# paths, rebuilt in one loop from benchmarks/mbpp/ whenever a pass is rescored.
+benchmarks/mbpp/validate-*/

@@ -387,3 +387,31 @@ def test_the_banner_is_printed_before_the_first_prompt() -> None:
     )
 
     assert written[0] == "hello"
+
+
+def test_a_blank_line_inside_a_block_does_not_chop_a_piped_script() -> None:
+    # The prompt ends a block on a blank line; a file has them inside `if` and
+    # `for` bodies as formatting. Read that way, the tail of the body arrives
+    # as top-level statements and every one of them is an IndentationError.
+    sandbox = FakeSandbox()
+    script = (
+        "found = []\n"
+        "if True:\n"
+        "    found.append('first')\n"
+        "\n"
+        "    found.append('second')\n"
+        "print(len(found))\n"
+    )
+
+    repl.run_script(sandbox, script, write=lambda _: None)
+
+    assert len(sandbox.executed) == 1
+    assert "second" in sandbox.executed[0]
+
+
+def test_an_empty_script_runs_nothing() -> None:
+    sandbox = FakeSandbox()
+
+    repl.run_script(sandbox, "   \n\n", write=lambda _: None)
+
+    assert sandbox.executed == []

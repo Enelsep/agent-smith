@@ -37,7 +37,7 @@ Keys are discovered from the endpoint: `--provider-url https://api.mistral.ai/v1
 ```bash
 uv run python -m agent_mbpp \
   --task-file tests/fixtures/mbpp_tasks.json --output solution.json \
-  --provider-url https://api.mistral.ai/v1 --model-name codestral-2508
+  --provider-url https://api.mistral.ai/v1 --model-name mistral-medium-latest
 ```
 
 **Run one SWE-bench task** (pulls the task's image)
@@ -63,6 +63,63 @@ cd moulinette
 uv run moulinette_eval dump swebench --task_id sympy__sympy-13480 --output /abs/path/task.json
 uv run moulinette_eval validate swebench task.json solution.json
 ```
+
+**On rootless Docker with a high host UID, `validate swebench` needs a one-line patch first.**
+School accounts sit well above the subuid range rootless Docker maps (typically 0–65536), and
+`moulinette/swebench/interact.py`'s `eval()` reaches `copy_to_container` twice — once for the
+patch, once for `eval.sh`. That helper tars the file preserving the host UID, so extraction
+inside the container calls `lchown(..., 102483, ...)`, gets `EINVAL`, and the validation fails
+*before the patch is applied*. The result is a false negative that looks like a wrong answer:
+
+```
+failed to Lchown "/tmp/patch.diff" for UID 102483, GID 4225: invalid argument
+```
+
+Check with `id`, `docker info | grep -i rootless`, and `grep "$(whoami)" /etc/subuid`. The fix
+is in the moulinette's own `.venv`, in `swebench/harness/docker_utils.py`, forcing every tar
+entry to root:
+
+```python
+def _root(ti):
+    ti.uid = ti.gid = 0
+    ti.uname = ti.gname = "root"
+    return ti
+
+
+tar.add(src, arcname=dst.name, filter=_root)
+```
+
+That `.venv` is not tracked, so the patch has to be reapplied after every `uv sync`. Diagnosis
+and fix from [JulesMattioni/agent_smith](https://github.com/JulesMattioni/agent_smith/blob/main/docs/bug-moulinette-docker-rootless.md).
+
+This is a scoring-side problem only. The agent itself never copies into a container: it
+declares read-only bind mounts at `docker run` and speaks over `docker exec -i`, so nothing it
+does goes through the failing path.
+
+**`dump swebench` can also die on a GitHub rate limit, and the message blames the wrong
+thing.** Building a task spec fetches the repository's `environment.yml` from
+`raw.githubusercontent.com`, unauthenticated, once per dump. Enough dumps in a short window and
+that endpoint answers 429 — after which
+`swebench.harness.test_spec.python.get_environment_yml_by_commit` turns every non-200 into one
+message:
+
+```
+ValueError: Could not find environment.yml at paths
+['ci/requirements/environment.yml', 'environment.yml'] for repo pydata/xarray at commit 1c198a19…
+```
+
+It says the file is missing; it means the request was refused. Settle it with
+
+```bash
+curl -o /dev/null -w '%{http_code}\n' \
+  https://raw.githubusercontent.com/<repo>/<commit>/ci/requirements/environment.yml
+```
+
+There is nothing to fix locally: the request carries a User-Agent and no authentication, and the
+bundled `swebench/resources/swebench-og/` cache does not hold every instance. It clears on its
+own — about fifteen minutes when we hit it — so the fix is to wait, and to avoid a campaign that
+re-dumps the same tasks in a loop. As above, the agent is never reached: the run dies before it
+starts.
 
 **Run a benchmark campaign** — the model × task matrix, resumable, one image resident at a time:
 
@@ -227,19 +284,21 @@ Implementation notes that mattered in practice:
 | `codestral-2508` | Mistral | 5/7 | 491,593 | 3,333 | 125s |
 | `llama-3.3-70b-versatile` | Groq | 5/7 | 77,344 | 813 | 232s |
 | `devstral-medium-latest` | Mistral | 4/7 | 582,465 | 4,503 | 1,025s |
-| `poolside/laguna-s-2.1:free` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
+| `poolside/laguna-s-2.1` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
 | `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 
-MBPP baseline: **233/257** with `mistral-medium-latest`.
+MBPP, measured over the whole 257-task pool rather than a sample: **238/257** with `mistral-medium-latest`, against 215 for `magistral-small-latest` and 207 for `codestral-2508`.
 
 **What the numbers say.**
 
-**Recommended default for SWE-bench: `qwen/qwen3.6-27b` (Groq).** The only model in the 11-way comparison with a perfect 7/7, including the one task (`scikit-learn-13779`) that stumped every OpenRouter and most Mistral models. Its raw efficiency is not the best in the pool (see §8.2), but efficiency-on-a-hard-ceiling — solving the tasks other models time out on — is what a 30-iteration/300k-token exam ceiling actually rewards.
+**Three models tie at 7/7** — `mistral-medium-latest`, `magistral-small-latest` and `qwen/qwen3.6-27b` — so capability does not pick the default. **SWE-bench runs on `magistral-small-latest`**, the fastest of the three end to end and the one whose provider gives us two keys against a per-second limit, where throttling arrives as delay the retry budget can spend rather than as a wall.
 
-**Strong second choice, different provider: `qwen/qwen3-235b-a22b-2507` (OpenRouter) or `magistral-small-latest` (Mistral).** Both 6-7/7, both efficient on what they solve. Keeping one of these configured as a fallback protects against the Groq-specific failure modes observed here (`llama-3.1-8b-instant`'s HTTP 413s, `llama-3.3-70b-versatile`'s one lockout) without adding a fourth provider to manage day-to-day.
+**`qwen/qwen3.6-27b` (Groq) is the cheapest by a wide margin** — the same 7/7 on 101,022 input tokens, a fifth of what `magistral-small-latest` spends — and would be the better choice on the numbers alone with a second key behind it.
 
-Full matrix, provider reliability, intermediary metrics and ablations: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). Backing `solution.json` files under `benchmarks/runs/`.
+**MBPP runs on `mistral-medium-latest`**, which the pool measures highest. The two benchmarks wanting different models is why `models.json` carries a default per benchmark.
+
+Full matrix, provider reliability, intermediary metrics and ablations: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). Backing `solution.json` files under `benchmarks/runs/` (SWE-bench) and `benchmarks/mbpp/` (MBPP).
 
 ## Resources
 

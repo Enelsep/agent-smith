@@ -14,7 +14,7 @@
 | `codestral-2508` | Mistral | code-specialised, configured default for MBPP |
 | `llama-3.3-70b-versatile` | Groq | |
 | `devstral-medium-latest` | Mistral | code-specialised |
-| `poolside/laguna-s-2.1:free` | Poolside | coding-focused startup model |
+| `poolside/laguna-s-2.1` | Poolside | coding-focused startup model |
 | `llama-3.1-8b-instant` | Groq | smallest model in the pool, for a capability floor |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | |
 
@@ -23,19 +23,19 @@ Two additional models were tried and **discarded before completing a full run** 
 - **`gemini-3.6-flash`** (Google): 0/7. The very first task burned 20 iterations before the single API key got rate-limited; every task after that failed instantly (0 iterations, ~148s each) because the key never recovered within the session. This is a provider-side lockout, not a capability failure — see §3.
 - **`gemma-4-31b-it`** (Google): abandoned mid-run. Its responses embed a `<thought>...</thought>` reasoning trace directly inside the completion content (the same failure family documented in §6.1), and the one task it was given took over 6 minutes without finishing — pulled before it produced usable data.
 
-**Tasks** (7, the pool documented in `Q14_TASK_POOL.md`):
+**Tasks** (7, each with the reason it was picked):
 
 | # | Task | Source | Difficulty |
 |---|---|---|---|
 | 1 | `sympy__sympy-14711` | Subject's own suggestion (p.21) | `<15 min fix` |
 | 2 | `sympy__sympy-13480` | Subject's own suggestion (p.21) | `<15 min fix` |
 | 3 | `pydata__xarray-4629` | Subject's own suggestion (p.21) | `<15 min fix` |
-| 4 | `django__django-11066` | `moulinette`'s `EXAM_POOL` (verified solvable by reference models) | `<15 min fix` |
-| 5 | `sympy__sympy-18189` | `moulinette`'s `EXAM_POOL` | `<15 min fix` |
-| 6 | `scikit-learn__scikit-learn-13439` | `moulinette`'s `EXAM_POOL` | `<15 min fix` |
-| 7 | `scikit-learn__scikit-learn-13779` | `moulinette.list_instances(exclude_exam_pool=True)`, same difficulty tier | `<15 min fix` |
+| 4 | `django__django-11066` | Added for repository coverage: the subject's three are sympy and xarray only | `<15 min fix` |
+| 5 | `sympy__sympy-18189` | Second sympy task, to separate repository from instance | `<15 min fix` |
+| 6 | `scikit-learn__scikit-learn-13439` | Fourth repository, same difficulty tier | `<15 min fix` |
+| 7 | `scikit-learn__scikit-learn-13779` | Second scikit-learn task, same tier, kept as the harder control | `<15 min fix` |
 
-Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `solution.json` files live at `benchmarks/runs/<model-slug>/<task_id>.json`, produced by `benchmarks/swe-matrix.sh`; per-model summaries are duplicated at `models_pool/<model-slug>.md` for quick reading.
+Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `solution.json` files live at `benchmarks/runs/<model-slug>/<task_id>.json`, produced by `benchmarks/swe-matrix.sh`.
 
 ## 2. Results
 
@@ -51,7 +51,7 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 | `codestral-2508` | Mistral | 5/7 | 491,593 | 3,333 | 125s |
 | `llama-3.3-70b-versatile` | Groq | 5/7 | 77,344 | 813 | 232s |
 | `devstral-medium-latest` | Mistral | 4/7 | 582,465 | 4,503 | 1,025s |
-| `poolside/laguna-s-2.1:free` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
+| `poolside/laguna-s-2.1` | Poolside | 3/7 | 692,208 | 9,811 | 895s |
 | `llama-3.1-8b-instant` | Groq | 2/7 | 319,054 | 4,769 | 3,008s |
 | `nvidia/nemotron-nano-9b-v2:free` | OpenRouter | 2/7 | 11,597 | 3,309 | 401s |
 
@@ -141,7 +141,119 @@ Repo spread: sympy ×3, scikit-learn ×2, django ×1, xarray ×1. All backing `s
 | nvidia/nemotron-nano-9b-v2:free | scikit-learn-13439 | no | 0 | 0 | 0 | 55s | empty completion |
 | nvidia/nemotron-nano-9b-v2:free | scikit-learn-13779 | no | 0 | 0 | 0 | 56s | empty completion |
 
+### 2.4 MBPP
+
+The matrix above is SWE-bench only. MBPP was measured separately, over the whole
+257-task `test` split rather than a sample, under the subject's MBPP ceilings
+(10 iterations, 6 000 input tokens, 1 500 output tokens, 120 s per task). Three
+Mistral models and one repeat, four passes on the same commit, scored with
+`moulinette_eval validate mbpp`:
+
+| Model | Passing | Ran out of budget | Submitted a wrong answer | Input tokens | Output tokens | s/task |
+|---|---|---|---|---|---|---|
+| `mistral-medium-latest` | **238 / 257** | 10 | 9 | 463,164 | 78,271 | 3.4 |
+| `mistral-medium-latest` *(repeat, same commit)* | **236 / 257** | 12 | 9 | 444,481 | 77,838 | 3.3 |
+| `magistral-small-latest` | 215 / 257 | 35 | 7 | 609,918 | 84,823 | 3.2 |
+| `codestral-2508` | 207 / 257 | 41 | 9 | 557,553 | 68,927 | 3.3 |
+
+**Those two failure columns are exhaustive — there is no third kind.** Every
+task that does not pass either exhausted a ceiling before submitting anything,
+or submitted an answer that satisfied the assertions the task ships and failed
+the ones it does not. Checked per task on all four passes, the second column is
+*exactly* the set of runs the harness reported as successful and the validation
+refused. Nothing is ever submitted that fails a test the agent could see: the
+refusal loop holds, and what leaks past it is only ever invisible to it.
+
+**Which means the ceiling decides, not the model.** Wrong answers are 9, 7 and 9
+— indistinguishable across three models spanning 31 points of score. What
+separates them is entirely the first column: 10 budget exits against 35 and 41.
+`magistral-small-latest` submits *fewer* wrong answers than
+`mistral-medium-latest` and still finishes 23 tasks behind it, because it spends
+its 6 000-token input allowance three and a half times more often before
+converging. On this benchmark the models differ in concision, not in
+correctness, and the headroom left in this harness is in `agent/history.py`'s
+compaction rather than in the model list. That is the opposite of the SWE-bench
+picture in §5, where prompt and tool design moved the score.
+
+**Read these scores with their run-to-run range, which was measured rather than
+assumed.** `mistral-medium-latest` was put through the whole pool twice on the
+same commit, four hours apart: 238 and 236. The error bar on a 257-task pass is
+therefore about two tasks, not the ten that counting budget exits would suggest.
+
+What the repeat settles is *which* part moves. Wrong answers came to **9 both
+times** — not a similar number, the same one — while budget exits went 10 then
+12. Seventeen of the failing tasks are common to both passes; only two fell out
+of the first list and four into the second, and every one of those six is a task
+that runs hot on input tokens, close enough to the 6 000-token ceiling that one
+extra turn decides it. So the pool splits into a hard core the model genuinely
+cannot solve and a thin margin that the day's verbosity tips either way.
+
+A single number in the table above is a draw from that range, not a constant.
+It is also why a 5-task comparison cannot rank two models whose ranges overlap:
+five draws from a 92% process return 4/5 or worse about one time in twenty, and
+that says nothing at all about the model.
+
+**None of these figures is a `success` count.** A task dump carries only the
+public assertions, so the harness validates against a subset of what finally
+judges it, and the gap is the second failure column: the agents claimed 247, 222
+and 216 successes where 238, 215 and 207 hold up. Task 20 is the clean case.
+Both assertions it ships are negative (`is_woodall(254) == False`,
+`is_woodall(200) == False`), so a solution computing `k * (2**k - 1)` instead of
+Woodall's `k * 2**k - 1` satisfies everything it was given and still fails.
+
+`mistral-medium-latest` is what `models.json` configures under
+`benchmark_defaults.mbpp`; `magistral-small-latest` stays on SWE-bench, where §2
+measures it at 7/7. The two benchmarks wanting different models is the reason
+that key exists. Backing files: the 1 028 solution files under
+`benchmarks/mbpp/<model>/`, four passes of 257, with the repeat under
+`benchmarks/mbpp/mistral-medium-latest-pass2/`; the 257 task dumps under
+`benchmarks/mbpp/tasks/`; and one `benchmarks/mbpp/<model>-validation.txt` per
+pass carrying the per-task verdict and the list of failing ids.
+
 ## 3. Provider reliability
+
+Computed from the `steps[]` of the 84 solution files under `benchmarks/runs/`, one
+row per model actually put through the matrix. **Avg response time** is the mean of
+`request_time_ms` over every request the model made — the endpoint's own latency, not
+the wall-clock of a task, which also contains sandbox execution and tool calls.
+**Retries** counts every re-attempt the provider forced, summed over those requests.
+**Availability** is the share of the 7 task runs not lost to a provider-side failure:
+a rate-limit lockout, an empty completion, or an HTTP 413. Runs lost to a ceiling, to
+non-convergence, or to our own container timeout are not counted against the provider.
+
+| Provider | Model | Requests | Avg response time / request | Retries | Availability |
+|---|---|---|---|---|---|
+| Mistral | `codestral-2508` | 75 | 0.80 s | 0 | 7/7 (100%) |
+| Mistral | `magistral-small-latest` | 80 | 0.88 s | 85 | 7/7 (100%) |
+| Mistral | `mistral-medium-latest` | 69 | 2.27 s | 263 | 7/7 (100%) |
+| Mistral | `devstral-medium-latest` | 74 | 7.44 s | 12 | 6/7 (86%) |
+| Groq | `qwen/qwen3.6-27b` | 43 | 0.64 s | 75 | 7/7 (100%) |
+| Groq | `llama-3.3-70b-versatile` | 32 | 0.36 s | 26 | 6/7 (86%) |
+| Groq | `llama-3.1-8b-instant` | 112 | 0.33 s | 212 | 3/7 (43%) |
+| OpenRouter | `qwen/qwen3-235b-a22b-2507` | 59 | 2.50 s | 0 | 7/7 (100%) |
+| OpenRouter | `nvidia/nemotron-nano-9b-v2:free` | 6 | 20.67 s | 0 | 2/7 (29%) |
+| Google | `gemini-3.1-flash-lite` | 86 | 3.53 s | 4 | 6/7 (86%) |
+| Google | `gemini-3.6-flash` | 20 | 4.30 s | 34 | 0/7 (0%) |
+| Poolside | `poolside/laguna-s-2.1` | 149 | 3.13 s | 1 | 7/7 (100%) |
+
+**Retries do not predict availability, and that is the retry budget working.**
+`mistral-medium-latest` was throttled harder than anything else in the table — 263
+retries against 69 requests, close to four re-attempts per call — and still finished
+7/7 with nothing lost. `codestral-2508` needed none and finished the same. What the
+retry loop buys is the conversion of a provider's throttling into latency instead of
+failure, which is exactly what §5.3 measures when the attempt ceiling is put back.
+
+**Speed does not predict availability either.** The two fastest models per request in
+the whole matrix are Groq's llamas at 0.33 s and 0.36 s, and they are also the two
+least available on that provider — 43% and 86%. `llama-3.1-8b-instant` answers
+quickly and refuses the payload: its 212 retries and 112 requests are the shape of a
+model being asked, repeatedly, for something its context window cannot hold.
+
+**A low request count is itself a reliability signal.** `nvidia/nemotron-nano-9b-v2:free`
+made 6 requests across 7 tasks, at 20.67 s each, because five of those tasks ended on
+an empty completion before a second turn was possible; `gemini-3.6-flash` made 20 and
+never recovered from its first lockout. Neither number describes a model that was
+given a fair chance to be slow — it describes one that stopped answering.
 
 | Provider | Models tested | What broke, concretely |
 |---|---|---|
@@ -169,7 +281,7 @@ Computed by walking `steps[]` in each successful run's `solution.json` (manual/s
 
 Every model that solves `sympy-13480` (the one-line typo) touches the right file on its very first step — the hint text essentially names the file, so this is the easy case. `xarray-4629` is the interesting split: `mistral-medium-latest` and `codestral-2508` locate `xarray/core/merge.py` on step 1, while `magistral-small-latest` needs 8 steps of exploration first (still finishes in 15 total) and `qwen3-235b-a22b-2507` needs 4.
 
-**(b) Iterations between "tests first pass" and `final_answer()`** (submission discipline — 0 is ideal, meaning the model submits the instant it has a passing run):
+**(b) Iterations between "tests first pass" and `final_answer()`** (submission discipline — 1 is the floor: `run_tests()` only reaches the model in the next turn's observation, so the earliest possible submission is the turn after it passes):
 
 | Model | sympy-14711 | sympy-13480 | xarray-4629 |
 |---|---|---|---|
@@ -224,7 +336,7 @@ With the cap, the very first sustained burst of 429s exhausts all 3 attempts bef
 
 ### 5.4 Prompt specificity (explicit vs. vague system prompt)
 
-**Change:** `prompts/swebench.md` (35 lines: turn format, `search_code_with_context` efficiency tip, explicit `final_answer(get_patch())` submission methodology) replaced with a 9-line vague version carrying only the turn format and the submission call, no methodology guidance. `qwen/qwen3.6-27b` on the 3 shortest tasks from the main matrix, reverted afterward (`git diff --stat` empty).
+**Change:** `src/agent_smith/prompts/swebench.md` (35 lines: turn format, `search_code_with_context` efficiency tip, explicit `final_answer(get_patch())` submission methodology) replaced with a 9-line vague version carrying only the turn format and the submission call, no methodology guidance. `qwen/qwen3.6-27b` on the 3 shortest tasks from the main matrix, reverted afterward (`git diff --stat` empty).
 
 | Task | Explicit prompt (baseline) | Vague prompt |
 |---|---|---|
@@ -297,7 +409,7 @@ Also 3/3 on the weaker model, and — unlike 5.4's prompt ablation — this one 
 
 Their result, on the 7-task matrix: **6/7 → 5/7**, with `scikit-learn__scikit-learn-13439` flipping from solved (7 iterations) to an outright failure (30 iterations, never called `final_answer()`), and general verbosity up across most tasks (input tokens +67–90% on `sympy-14711` and `sympy-18189`).
 
-**This was reproduced independently** — the same paragraph inserted into `prompts/swebench.md` (after `{tools}`, before the `search_code_with_context` tip), the same model, the same 7 tasks, reverted afterward (`git diff --stat` empty, `pytest tests/test_prompts.py` 12/12):
+**This was reproduced independently** — the same paragraph inserted into `src/agent_smith/prompts/swebench.md` (after `{tools}`, before the `search_code_with_context` tip), the same model, the same 7 tasks, reverted afterward (`git diff --stat` empty, `pytest tests/test_prompts.py` 12/12):
 
 | Task | Baseline (no paragraph) | Teammate's run (with paragraph) | This reproduction (with paragraph) |
 |---|---|---|---|
@@ -345,7 +457,7 @@ The three models with the highest total input-token spend are not the best perfo
 
 | Model | Total input tokens | Solved |
 |---|---|---|
-| `poolside/laguna-s-2.1:free` | 692,208 | 3/7 |
+| `poolside/laguna-s-2.1` | 692,208 | 3/7 |
 | `devstral-medium-latest` | 582,465 | 4/7 |
 | `gemini-3.1-flash-lite` | 492,995 | 6/7 |
 | `qwen/qwen3.6-27b` | **101,022** | **7/7** |
@@ -365,7 +477,7 @@ The most expensive thing that happened during this project was not a large token
 - **Task IDs**: the 7 listed in §1, all `SWE-bench_Verified` instances resolved via `moulinette.dump swebench --task_id <id>`.
 - **Model IDs and endpoints**: exact strings and `base_url`s are in `models.json` at the repository root; the ones tested here are listed verbatim in §1's table.
 - **Command**: each cell in §2.3 is one `uv run python -m agent_swebench --task-file benchmarks/runs/tasks/<task>.json --output benchmarks/runs/<model-slug>/<task>.json --env-file .env --provider-url <url> --model-name <model>` invocation, orchestrated by `benchmarks/swe-matrix.sh` (resumable: re-running the same `TASKS`/`MODELS` combination skips any cell whose output file already exists).
-- **Raw data**: every cell's full `solution.json` (per-step `llm_output`, `sandbox_input`, `sandbox_output`, token counts, timestamps) is under `benchmarks/runs/<model-slug>/<task>.json`; per-model rollups are duplicated at `models_pool/<model-slug>.md`.
+- **Raw data**: every cell's full `solution.json` (per-step `llm_output`, `sandbox_input`, `sandbox_output`, token counts, timestamps) is under `benchmarks/runs/<model-slug>/<task>.json`.
 - **When this was collected**: 2026-08-13/14. This matters more than usual for this report: model catalogues and free-tier quotas are explicitly *not* stable over time (the subject itself warns of this, p.29) — two Google Pro models were unusable on this account on this date for billing reasons that could change, and the OpenRouter cap reset is tied to a wall-clock day boundary, so re-running this exact matrix on a different day can legitimately produce different availability, independent of any code change.
 - **Environment**: Python 3.10, `uv`-managed, single API key per provider except where noted (Mistral, Google, Groq, Poolside all ran on one key each; OpenRouter likewise).
 
@@ -381,14 +493,16 @@ The most expensive thing that happened during this project was not a large token
 
 ## 9. Conclusions
 
-**Recommended default for SWE-bench: `qwen/qwen3.6-27b` (Groq).** The only model in the 11-way comparison with a perfect 7/7, including the one task (`scikit-learn-13779`) that stumped every OpenRouter and most Mistral models. Its raw efficiency is not the best in the pool (see §8.2), but efficiency-on-a-hard-ceiling — solving the tasks other models time out on — is what a 30-iteration/300k-token exam ceiling actually rewards.
+**Three models tie at the top: `mistral-medium-latest`, `magistral-small-latest` and `qwen/qwen3.6-27b` all solve 7/7.** Capability does not separate them, so the choice is made on what does: cost and provider resilience.
 
-**Strong second choice, different provider: `qwen/qwen3-235b-a22b-2507` (OpenRouter) or `magistral-small-latest` (Mistral).** Both 6-7/7, both efficient on what they solve. Keeping one of these configured as a fallback protects against the Groq-specific failure modes observed here (`llama-3.1-8b-instant`'s HTTP 413s, `llama-3.3-70b-versatile`'s one lockout) without adding a fourth provider to manage day-to-day.
+**Recommended default for SWE-bench: `magistral-small-latest` (Mistral).** It is the fastest of the three end to end (388s against 602s and 947s), and §3 measures it at 100% availability with 85 retries absorbed into latency rather than failure. What decides it is the shape of the quota behind it: Mistral gives us two keys against a limit expressed per second, so throttling arrives as delay the retry budget can spend. Our Groq access is one key against a cap expressed per day — a wall that returns nothing rather than returning late, and that a single benchmark campaign is enough to reach.
 
-**`mistral-medium-latest` and `magistral-small-latest` remain solid, single-provider-risk options.** Both 7/7, both already configured in `models.json`. Their exposure is entirely captured in §3 and §8.3: fine as long as the single Mistral key isn't simultaneously serving a second benchmark run.
+**`qwen/qwen3.6-27b` (Groq) is the strong alternative, and by far the cheapest.** 7/7 on 101,022 input tokens, a fifth of what `magistral-small-latest` spends for the same score, and the lowest per-task peak in the matrix. A second Groq key on a separate account would remove the objection above and make it the better choice on the numbers.
+
+**`mistral-medium-latest` stays configured, on MBPP.** 7/7 here too, but §2.3 shows it reaching 235,537 input tokens on a single task against a 300,000 ceiling, the narrowest margin of the three; §2.4 is where it earns its place instead.
 
 **Deprioritise on capability grounds: `codestral-2508`, `llama-3.3-70b-versatile`.** Both 5/7, but the failures cluster on the harder tasks (`sympy-14711`, `scikit-learn-13779`) rather than on infrastructure — `codestral-2508` never once needed a retry and still failed to converge twice.
 
-**Deprioritise on reliability grounds: `poolside/laguna-s-2.1:free` (3/7, non-convergent on 4/7), `llama-3.1-8b-instant` (2/7, context-window-limited on 4/7), `nvidia/nemotron-nano-9b-v2:free` (2/7, reasoning-token starvation on 5/7).** Different root causes (§8.1, §6.1), same practical outcome: not dependable enough for a graded run under this project's fixed budgets.
+**Deprioritise on reliability grounds: `poolside/laguna-s-2.1` (3/7, non-convergent on 4/7), `llama-3.1-8b-instant` (2/7, context-window-limited on 4/7), `nvidia/nemotron-nano-9b-v2:free` (2/7, reasoning-token starvation on 5/7).** Different root causes (§8.1, §6.1), same practical outcome: not dependable enough for a graded run under this project's fixed budgets.
 
 **Drop `devstral-medium-latest` and `gemini-3.6-flash`/`gemma-4-31b-it` from consideration.** `devstral-medium-latest` is the highest-token, lowest-solve-rate model that still technically ran to completion (4/7). The two discarded Google models never produced a usable comparison at all — one to a provider-side lockout, one to the reasoning-token pattern combined with excessive latency — which is itself a data point: not every free-tier model is worth finishing a full matrix on, and recognising that early is part of running this kind of campaign efficiently.
