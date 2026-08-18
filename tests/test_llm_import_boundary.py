@@ -80,9 +80,10 @@ def test_only_the_provider_module_imports_an_http_client() -> None:
 
 
 def test_the_modules_at_the_repository_root_are_scanned_too() -> None:
-    # Guards the test above against silently covering src/ only: main.py and
-    # the two mcp_tools_*.py are shipped in the wheel and are the first files
-    # a reviewer opens.
+    # Guards the test above against silently covering src/ only. The two
+    # mcp_tools_*.py are force-included in the wheel and run inside the
+    # SWE-bench container; main.py ships nowhere, but it sits at the root
+    # where it is among the first files a reviewer opens.
     scanned = {path.relative_to(REPO_ROOT).as_posix() for path in _scanned_files()}
     assert {"main.py", "mcp_tools_mbpp.py", "mcp_tools_swebench.py"} <= scanned
 
